@@ -56,6 +56,8 @@ Items from the same conversation group into one row (pile uses the thread id app
 
 **Screen-share mode** (`p`, or open `/?private`) blurs every name, message and avatar so you can demo or stream your real inbox. `/?private&keep=github` leaves repo names readable.
 
+**Follow mode:** drive pile in your own window and share a second one opened at `http://127.0.0.1:8765/?private&follow`. It mirrors your cursor, selection, menus, toasts and scroll live, blurred, and ignores input (Esc detaches it).
+
 **History:** `pile history` lists what you did (open, done, snooze, labels, link fixes), newest first, `--json` for scripts. `pile reopen --since 2h` (or `--all`, `--source github`) puts cleared items back. `pile list --state done` shows what you cleared. `pile undo` and `pile redo` work from the terminal too.
 
 **Opening Messages:** a Messages notification only names the sender, so pile looks the message up in `chat.db` (by its text and time) to open that exact conversation, and keeps the link. `pile open-test <id>` shows which link it would use and why.

@@ -38,18 +38,28 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
 .row{display:grid;grid-template-columns:36px 1fr auto;gap:12px;padding:12px 16px 12px 14px;border-top:1px solid var(--line);
   border-left:3px solid transparent;cursor:pointer;position:relative}
 .row:first-child{border-top:0}
-.row:hover{background:#181b21}
-.row.sel{background:var(--raise);border-left-color:var(--accent)}
+.row:hover{background:rgba(255,255,255,.025)}
+.row.sel{}
+/* One cursor and one tint per selected run, drawn under the rows and gliding between them. */
+.list{position:relative}
+.row{z-index:1}
+#hl{position:absolute;left:0;right:0;top:0;height:0;background:var(--raise);box-shadow:inset 3px 0 0 var(--accent);
+  z-index:0;pointer-events:none;transition:top .1s ease,height .1s ease}
+.pickblock{position:absolute;left:5px;right:5px;background:rgba(255,181,71,.10);border-radius:10px;z-index:0;
+  pointer-events:none;transition:top .1s ease,height .1s ease}
+body.private #hl{background:#2b303b;box-shadow:inset 4px 0 0 var(--accent)}
+body.private .pickblock{background:rgba(255,181,71,.2)}
+@media (prefers-reduced-motion:reduce){#hl,.pickblock{transition:none}}
+.followbadge{position:fixed;left:12px;bottom:12px;z-index:9;font-size:12px;font-weight:600;color:var(--accent-ink);
+  background:var(--accent);border-radius:8px;padding:4px 9px}
 .acts{position:absolute;right:10px;top:8px;display:none;gap:4px;background:var(--raise);padding:3px;border-radius:9px;border:1px solid var(--line);z-index:1}
 .row:hover .acts,.row.sel .acts{display:flex}
 .acts button{font-size:12px;padding:3px 8px;border-radius:6px;color:var(--dim)}
 .acts button:hover{background:var(--bg);color:var(--text)}
 @media (hover:hover){.row.sel:not(:hover) .acts{display:none}}
-.row.picked{background:rgba(255,181,71,.08)}
+.row.picked{}
 .row.picked .av{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
 /* Screen-share mode blurs the avatar (and its ring) and the text, so the cursor and the selection carry their own marks. */
-body.private .row.sel{outline:2px solid var(--accent);outline-offset:-2px;border-left-width:6px;background:#22252c}
-body.private .row.picked{background:rgba(255,181,71,.16);box-shadow:inset 6px 0 0 var(--accent)}
 #picked b{color:var(--accent)}
 .av{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:700;font-size:14px;color:#0d0e11}
 .main{min-width:0}
@@ -66,7 +76,7 @@ body.private .row.picked{background:rgba(255,181,71,.16);box-shadow:inset 6px 0 
 .chip.fyi{background:rgba(143,166,200,.15);color:var(--fyi)}
 .chip.tag.task{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .chip.tag{background:rgba(255,181,71,.12);color:var(--accent);border:1px solid rgba(255,181,71,.35)}
-.row:not(.sel) .l2.older{display:none}
+.row:not(.open) .l2.older{display:none}
 .l2.older{font-size:13px;margin-top:3px;padding-left:10px;border-left:2px solid var(--line)}
 .chip.noise{background:rgba(85,91,102,.18);color:var(--noise)}
 .learned{font-size:11px;color:var(--ok)}
@@ -143,7 +153,7 @@ body.private .privbadge{display:inline-block}
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
-const S = {toggled: new Set(), anchor: null, items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
+const S = {follow: new URLSearchParams(location.search).has("follow"), expanded: null, toggled: new Set(), anchor: null, items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
 const SOURCES = {macos: "Notifications", windows: "Notifications", linux: "Notifications", github: "GitHub", imap: "Mail",
   mailapp: "Apple Mail", messages: "Messages", webhook: "Webhook", demo: "Demo"};
 function srcLabel(k){
@@ -165,7 +175,8 @@ function ago(t){
   if (d < 86400) return Math.floor(d / 3600) + "h";
   return Math.floor(d / 86400) + "d";
 }
-function toast(msg){ const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 2600); }
+function toast(msg){ lastToast = {id: TAB + ++toastSeq, text: msg}; showToast(msg); publish(); }
+function showToast(msg){ const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 2600); }
 async function api(path, body){
   const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
   const j = await r.json();
@@ -267,8 +278,7 @@ function render(){
       <div class="side"><span class="when">${ago(it.at)}</span>${g.items.length > 1 ? `<span class="more">${g.items.length}</span>` : ""}</div>
       ${ask}</div>`;
   }).join("") + `</div>`;
-  const sel = document.querySelector(".row.sel");
-  if (sel) sel.scrollIntoView({block: "nearest"});
+  decorate();
 }
 
 // Moving the cursor or the selection only flips classes on rows already on screen: no rebuild, so key repeat stays smooth.
@@ -276,26 +286,118 @@ let paintQueued = false;
 function paint(){
   if (paintQueued) return;
   paintQueued = true;
-  requestAnimationFrame(() => {
-    paintQueued = false;
-    const rows = document.querySelectorAll("#list .row");
-    const gs = groups();
-    if (rows.length !== gs.length) { render(); return; }
-    S.sel = Math.max(0, Math.min(S.sel, gs.length - 1));
-    const P = pickedSet(gs);
-    rows.forEach((el, i) => {
-      el.classList.toggle("sel", i === S.sel);
-      const on = P.has(gs[i].lead.thread);
-      if (el.classList.contains("picked") !== on) {
-        el.classList.toggle("picked", on);
-        const b = el.querySelector('[data-a="pick"]'); if (b) b.textContent = on ? "Unselect" : "Select";
-      }
-      const ask = el.querySelector(".ask"); if (ask && S.asked !== gs[i].lead.id) ask.remove();
-    });
-    $("#picked").innerHTML = P.size ? `<b>${P.size}</b> selected · <kbd>Esc</kbd> to clear` : "";
-    const sel = rows[S.sel]; if (sel) sel.scrollIntoView({block: "nearest"});
-  });
+  requestAnimationFrame(() => { paintQueued = false; decorate(); });
 }
+// Classes, the gliding cursor and the selection tint, on the rows already on screen.
+function decorate(){
+  const list = document.querySelector("#list .list");
+  const rows = list ? [...list.querySelectorAll(".row")] : [];
+  const gs = groups();
+  if (rows.length !== gs.length) { render(); return; }
+  S.sel = Math.max(0, Math.min(S.sel, gs.length - 1));
+  const P = pickedSet(gs);
+  rows.forEach((el, i) => {
+    el.classList.toggle("sel", i === S.sel);
+    el.classList.toggle("open", gs[i].lead.thread === S.expanded);
+    const on = P.has(gs[i].lead.thread);
+    if (el.classList.contains("picked") !== on) {
+      el.classList.toggle("picked", on);
+      const b = el.querySelector('[data-a="pick"]'); if (b) b.textContent = on ? "Unselect" : "Select";
+    }
+    const ask = el.querySelector(".ask"); if (ask && S.asked !== gs[i].lead.id) ask.remove();
+  });
+  $("#picked").innerHTML = P.size ? `<b>${P.size}</b> selected · <kbd>Esc</kbd> to clear` : "";
+  if (list) {
+    let hl = list.querySelector("#hl");
+    if (!hl) { hl = document.createElement("div"); hl.id = "hl"; list.prepend(hl); }
+    const r = rows[S.sel];
+    if (r) { hl.style.top = r.offsetTop + "px"; hl.style.height = r.offsetHeight + "px"; }
+    const runs = [];
+    rows.forEach((el, i) => {
+      if (!P.has(gs[i].lead.thread)) return;
+      const last = runs[runs.length - 1];
+      if (last && last.end === i - 1) { last.end = i; last.bottom = el.offsetTop + el.offsetHeight; }
+      else runs.push({end: i, top: el.offsetTop, bottom: el.offsetTop + el.offsetHeight});
+    });
+    const blocks = [...list.querySelectorAll(".pickblock")];
+    runs.forEach((run, k) => {
+      let b = blocks[k];
+      if (!b) { b = document.createElement("div"); b.className = "pickblock"; list.prepend(b); }
+      b.style.top = (run.top + 3) + "px"; b.style.height = (run.bottom - run.top - 6) + "px";
+    });
+    blocks.slice(runs.length).forEach(b => b.remove());
+    if (r && !S.follow) r.scrollIntoView({block: "nearest"});
+  }
+  publish();
+}
+
+// ---- Follow mode: a second tab (?follow, add &private to blur) mirrors this one live, for screen sharing. ----
+const TAB = Math.random().toString(36).slice(2);
+let pubTimer = null, toastSeq = 0, lastToast = null;
+function publish(){
+  if (S.follow) return;
+  clearTimeout(pubTimer);
+  pubTimer = setTimeout(() => {
+    const g = groups()[S.sel], row = document.querySelectorAll("#list .row")[S.sel];
+    const pop = $("#pop").classList.contains("show");
+    const opts = [...document.querySelectorAll("#popcard .opts button")];
+    const state = {tab: TAB, view: S.view, source: S.source, filter: S.filter, sel: g ? g.lead.thread : null,
+      visible: groups().map(x => x.lead.thread), stats: S.stats,  // so followers drop cleared rows before the server confirms
+      toggled: [...S.toggled], anchor: S.anchor, asked: S.asked, expanded: S.expanded,
+      modal: pop ? {html: $("#popcard").innerHTML, hl: opts.findIndex(b => b.classList.contains("hl")),
+                    input: ($("#popcard input") || {}).value || ""} : null,
+      drawer: $("#drawer").classList.contains("show"), toast: lastToast,
+      offset: row ? row.getBoundingClientRect().top : null, scrollY: window.scrollY};
+    fetch("/api/presence", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(state)}).catch(() => {});
+  }, 50);
+}
+async function followLoop(){
+  let since = 0, version = -1;
+  const badge = document.createElement("div");
+  badge.className = "followbadge"; badge.textContent = "Following · Esc to detach";
+  document.body.appendChild(badge);
+  while (S.follow) {
+    try {
+      const r = await (await fetch("/api/presence?since=" + since + "&wait=15")).json();
+      since = r.seq;
+      const st = r.state;
+      if (!st || !S.follow) continue;
+      let fresh = r.version !== version || st.view !== S.view || st.source !== S.source;
+      version = r.version;
+      S.view = st.view; S.source = st.source; S.filter = st.filter || "";
+      if (fresh) {
+        const q = new URLSearchParams({state: ["unanswered", "sift"].includes(S.view) ? "new" : S.view});
+        if (S.source) q.set("source", S.source);
+        const j = await api("/api/items?" + q);
+        S.items = j.items; S.stats = j.stats;
+      }
+      if (st.stats && !fresh) S.stats = st.stats;
+      if (st.visible) {
+        const vis = new Set(st.visible), before = S.items.length;
+        S.items = S.items.filter(x => vis.has(x.thread));
+        if (S.items.length !== before) fresh = true;
+      }
+      S.toggled = new Set(st.toggled || []); S.anchor = st.anchor; S.asked = st.asked; S.expanded = st.expanded;
+      const i = groups().findIndex(g => g.lead.thread === st.sel); if (i >= 0) S.sel = i;
+      filter.style.display = S.filter ? "block" : "none"; filter.value = S.filter;
+      if (fresh || document.querySelectorAll("#list .row").length !== groups().length) render(); else decorate();
+      if (st.modal) {
+        if ($("#popcard").innerHTML !== st.modal.html) $("#popcard").innerHTML = st.modal.html;
+        $("#pop").classList.add("show");
+        const inp = $("#popcard input"); if (inp) inp.value = st.modal.input;
+      } else $("#pop").classList.remove("show");
+      const open = $("#drawer").classList.contains("show");
+      if (st.drawer !== open) drawer(st.drawer);
+      if (st.toast && (!lastToast || st.toast.id !== lastToast.id)) { lastToast = st.toast; showToast(st.toast.text); }
+      const row = document.querySelectorAll("#list .row")[S.sel];
+      if (row && st.offset !== null) window.scrollBy(0, row.getBoundingClientRect().top - st.offset);
+      else if (st.scrollY !== undefined) window.scrollTo(0, st.scrollY);
+    } catch (e) { await new Promise(r => setTimeout(r, 1000)); }
+  }
+  badge.remove();
+}
+window.addEventListener("scroll", () => publish(), {passive: true});
+document.addEventListener("click", e => { if (S.follow) { e.stopPropagation(); e.preventDefault(); } }, true);
 
 function current(){ return groups()[S.sel]; }
 // The selected rows, or just the current one. Every batch is one history entry, so one undo.
@@ -350,8 +452,10 @@ async function openSel(){
 }
 
 function modal(html, onkey){ $("#popcard").innerHTML = html; $("#pop").classList.add("show"); modal.onkey = onkey; const inp = $("#popcard input"); if (inp) inp.focus();
-  const first = $("#popcard .opts button"); if (first && !inp) first.classList.add("hl"); }
-function closeModal(){ $("#pop").classList.remove("show"); modal.onkey = null; }
+  const first = $("#popcard .opts button"); if (first && !inp) first.classList.add("hl");
+  if (inp) inp.addEventListener("input", publish);
+  publish(); }
+function closeModal(){ $("#pop").classList.remove("show"); modal.onkey = null; publish(); }
 $("#pop").addEventListener("click", e => { if (e.target.id === "pop") closeModal(); });
 
 function snoozeMenu(){
@@ -449,12 +553,12 @@ function describe(r){
 }
 async function drawer(show){
   const d = $("#drawer");
-  if (!show) { d.classList.remove("show"); return; }
+  if (!show) { d.classList.remove("show"); publish(); return; }
   await loadRules();
   d.innerHTML = `<h3>What I've learned</h3><p style="color:var(--dim);font-size:13px;margin:0 0 12px">From your corrections and your agents. Learned rules beat the built-in links and the model. <kbd>esc</kbd> closes.</p>` +
     (S.rules.length ? S.rules.map(r => `<div class="rule"><span class="k">${esc(r.kind)}</span><div>${describe(r)}</div><button data-del="${r.id}" title="Forget">×</button></div>`).join("")
       : `<p style="color:var(--faint)">Nothing yet. Press <kbd>f</kbd> on an item to fix where it opens, <kbd>+</kbd> or <kbd>-</kbd> to teach importance, <kbd>c</kbd> to combine selected rows into one conversation.</p>`);
-  d.classList.add("show");
+  d.classList.add("show"); publish();
 }
 $("#drawer").addEventListener("click", async e => {
   const b = e.target.closest("[data-del]"); if (!b) return;
@@ -494,6 +598,10 @@ filter.addEventListener("keydown", e => {
 });
 
 document.addEventListener("keydown", e => {
+  if (S.follow) {
+    if (e.key === "Escape") { S.follow = false; $("#pop").classList.remove("show"); showToast("Stopped following; this tab is yours now"); }
+    return;
+  }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if ($("#pop").classList.contains("show")) {
     if (e.key === "Escape") { closeModal(); return; }
@@ -502,7 +610,7 @@ document.addEventListener("keydown", e => {
     if (opts.length && e.target.tagName !== "INPUT") {
       const at = Math.max(0, opts.findIndex(b => b.classList.contains("hl")));
       const step = {ArrowDown: 1, j: 1, ArrowUp: -1, k: -1}[e.key];
-      if (step) { opts[at].classList.remove("hl"); opts[(at + step + opts.length) % opts.length].classList.add("hl"); e.preventDefault(); return; }
+      if (step) { opts[at].classList.remove("hl"); opts[(at + step + opts.length) % opts.length].classList.add("hl"); e.preventDefault(); publish(); return; }
       if (e.key === "Enter") { e.preventDefault(); opts[at].click(); return; }
     }
     if (modal.onkey && e.target.tagName !== "INPUT" && modal.onkey(e.key)) e.preventDefault();
@@ -524,6 +632,7 @@ document.addEventListener("keydown", e => {
     case "J": extend(1, n); S.asked = null; paint(); break;
     case "K": extend(-1, n); S.asked = null; paint(); break;
     case "x": pick(S.sel); paint(); break;
+    case " ": { e.preventDefault(); const g = current(); if (g) { S.expanded = S.expanded === g.lead.thread ? null : g.lead.thread; paint(); } break; }
     case "Escape": if (pickedSet().size) { clearPicks(); paint(); } break;
     case "o": openSel(); break;
     case "Enter": if (e.target.tagName !== "BUTTON") openSel(); break;
@@ -564,10 +673,11 @@ function setPrivate(on){
   if (q.get("keep") === "github") document.body.classList.add("keep-github");
 })();
 load(); loadRules();
+if (S.follow) followLoop();
 let lastKey = 0;
 document.addEventListener("keydown", () => { lastKey = Date.now(); }, true);
 setInterval(() => {
-  if (!$("#pop").classList.contains("show") && document.visibilityState === "visible" && !S.pending && Date.now() - lastKey > 2000) load();
+  if (!S.follow && !$("#pop").classList.contains("show") && document.visibilityState === "visible" && !S.pending && Date.now() - lastKey > 2000) load();
 }, 15000);
 </script>
 </body>

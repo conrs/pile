@@ -13,7 +13,35 @@ from .collectors import webhook
 UI = os.path.join(os.path.dirname(__file__), "ui.html")
 
 
-def make_handler(store, lock, collect_kwargs):
+class Presence:
+    """The driving tab's live view, for follower tabs (screen sharing). Memory only."""
+
+    def __init__(self):
+        self.cond = threading.Condition()
+        self.seq = 0          # bumps on every publish or data change
+        self.version = 0      # bumps on every data change, so followers refetch items
+        self.state = None
+
+    def publish(self, state):
+        with self.cond:
+            self.state, self.seq = state, self.seq + 1
+            self.cond.notify_all()
+
+    def changed(self):
+        with self.cond:
+            self.version += 1
+            self.seq += 1
+            self.cond.notify_all()
+
+    def wait(self, since, timeout=15.0):
+        with self.cond:
+            self.cond.wait_for(lambda: self.seq > since, timeout=timeout)
+            return {"seq": self.seq, "version": self.version, "state": self.state}
+
+
+def make_handler(store, lock, collect_kwargs, presence=None):
+    presence = presence or Presence()
+
     def post_routes():
         return {
             "/api/done": lambda b: actions.done(store, b["ids"]),
@@ -60,6 +88,8 @@ def make_handler(store, lock, collect_kwargs):
                 return self._send(403, {"error": "forbidden host"})
             u = urlparse(self.path)
             q = {k: v[0] for k, v in parse_qs(u.query).items()}
+            if u.path == "/api/presence":  # long poll: answers as soon as the driver changes anything
+                return self._send(200, presence.wait(int(q.get("since", 0) or 0), min(float(q.get("wait", 15)), 25)))
             with lock:
                 if u.path == "/":
                     with open(UI, "rb") as f:
@@ -80,20 +110,32 @@ def make_handler(store, lock, collect_kwargs):
                     if n > 65536:
                         return self._send(413, {"error": "too big"})
                     with lock:
-                        return self._send(200, webhook.ingest(store, json.loads(self.rfile.read(n) or b"{}")))
+                        out = webhook.ingest(store, json.loads(self.rfile.read(n) or b"{}"))
+                    presence.changed()
+                    return self._send(200, out)
                 except (ValueError, TypeError) as e:
                     return self._send(400, {"error": str(e)})
             # JSON content type forces a CORS preflight, which we never answer: no cross-site POSTs.
             if not self._local() or not (self.headers.get("Content-Type") or "").startswith("application/json"):
                 return self._send(403, {"error": "forbidden"})
-            fn = post_routes().get(urlparse(self.path).path)
+            path = urlparse(self.path).path
+            if path == "/api/presence":
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > 262144:
+                    return self._send(413, {"error": "too big"})
+                presence.publish(json.loads(self.rfile.read(n) or b"{}"))
+                return self._send(200, {"ok": True})
+            fn = post_routes().get(path)
             if not fn:
                 return self._send(404, {"error": "not found"})
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}")
                 with lock:
-                    return self._send(200, fn(body))
+                    out = fn(body)
+                if path not in ("/api/open",):
+                    presence.changed()
+                return self._send(200, out)
             except (KeyError, ValueError, TypeError) as e:
                 return self._send(400, {"error": str(e)})
             except Exception as e:
@@ -104,6 +146,7 @@ def make_handler(store, lock, collect_kwargs):
 
 def serve(store, port=8765, watch=0, collect_kwargs=None, host="127.0.0.1"):
     lock = threading.Lock()
+    presence = Presence()
     collect_kwargs = collect_kwargs or {}
     webhook.token(store)
     if watch:
@@ -113,10 +156,12 @@ def serve(store, port=8765, watch=0, collect_kwargs=None, host="127.0.0.1"):
             ev = threading.Event()
             while True:
                 with lock:
-                    collectors.run_all(store, quiet=True, **collect_kwargs)
+                    counts = collectors.run_all(store, quiet=True, **collect_kwargs)
+                if any(isinstance(v, int) and v for v in counts.values()):
+                    presence.changed()
                 ev.wait(watch)
         threading.Thread(target=loop, daemon=True).start()
-    httpd = ThreadingHTTPServer((host, port), make_handler(store, lock, collect_kwargs))
+    httpd = ThreadingHTTPServer((host, port), make_handler(store, lock, collect_kwargs, presence))
     print("pile: http://127.0.0.1:%d  (Ctrl-C to stop)" % port)
     if host != "127.0.0.1":
         print("pile: POST /ingest also open on %s:%d (token-protected; the UI stays local-only)" % (host, port))
