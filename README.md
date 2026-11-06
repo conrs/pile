@@ -138,6 +138,8 @@ Claude Code:
 
 ```sh
 claude mcp add pile -- python3 -m pile mcp
+# or, so the agent sees pseudonyms instead of names and no secrets:
+claude mcp add pile -- python3 -m pile mcp --redact
 ```
 
 Claude Desktop (`claude_desktop_config.json`):
@@ -163,6 +165,19 @@ Tools: `list_inbox {source?, state?, label?, tag?, limit?}`, `history {limit?}`,
 - **Mute.** `m` skips an app from now on and clears what's there.
 
 Everything learned is in the Learned panel (`?`), where you can delete any of it. Agents can read and write the same rules over MCP.
+
+## Redaction: what agents see
+
+Your inbox is full of other people's names, phone numbers and one-time codes. Run the MCP server with `--redact` (or set `PILE_REDACT=1`) and agents get the context without those:
+
+- **Secrets are dropped:** one-time and verification codes, API keys and tokens (`sk-`, `ghp_`, `xoxb-`, `AKIA`, JWTs, long random strings), `password: ...`, card numbers (Luhn-checked) and IBANs become `[code]`, `[secret]`, `[card]`, `[iban]`.
+- **People become stable pseudonyms:** names, emails and phone numbers turn into `Person-7f3a`, `Email-…`, `Phone-…`, a keyed hash with a local key (`redact.key` next to the database, mode 600). The same person is the same pseudonym everywhere, so an agent can say "Person-7f3a asked twice", and pile maps it back when the agent acts on it. Street addresses become `[address]`.
+- **Context stays:** apps, public repo names, times and ordinary numbers ("3 PRs", "#412") are untouched. Add your own name and anything else to keep with `PILE_REDACT_ALLOW=Matt,acme`.
+- **Actions still work:** tools take item ids and the pseudonyms the agent was shown.
+
+`pile doctor` suggests it when your triage model isn't local, and the UI header shows "agents: redacted" when the server runs with it. `pile export --redacted [--json]` gives the same view for a bug report or demo data, and `/?private=names` shows pseudonyms on screen instead of blur. An optional model pass (`PILE_REDACT_MODEL=1`) rewrites message bodies into neutral one-liners using your triage endpoint, after the deterministic pass and checked again by it.
+
+The approach (drop secrets, drop PII, keep context, rewrite, and content-hash things so they can still be referred to) comes from [Viva la Trace](https://github.com/MT-GoCode/viva-la-trace).
 
 ## Optional: model triage
 

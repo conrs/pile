@@ -95,8 +95,15 @@ def make_handler(store, lock, collect_kwargs, presence=None):
                     with open(UI, "rb") as f:
                         return self._send(200, f.read(), "text/html; charset=utf-8")
                 if u.path == "/api/items":
-                    return self._send(200, {"items": store.items(q.get("state", "new"), q.get("source") or None),
-                                            "stats": store.stats(), "triage": bool(triage.config())})
+                    from . import redact
+                    items = store.items(q.get("state", "new"), q.get("source") or None)
+                    if q.get("names"):  # screen-share with pseudonyms instead of blur
+                        r = redact.Redactor(store)
+                        for it in items:
+                            red = r.item(it)
+                            it["r"] = {k: red[k] for k in ("sender", "title", "body")}
+                    return self._send(200, {"items": items, "stats": store.stats(), "triage": bool(triage.config()),
+                                            "redact": redact.enabled()})
                 if u.path == "/api/rules":
                     return self._send(200, {"rules": rules.all_rules(store)})
             self._send(404, {"error": "not found"})

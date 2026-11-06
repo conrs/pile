@@ -36,6 +36,11 @@ def doctor(s, kw):
                 print("      %s  %s" % ("ok" if good else "!!", line))
     print("\n  triage    " + ("model: %s" % triage.config()[1] if triage.config()
                                else "off (set PILE_BASE_URL and PILE_MODEL to label with a model)"))
+    from . import redact
+    cfg = triage.config()
+    cloud = bool(cfg) and not any(h in cfg[0] for h in ("localhost", "127.0.0.1", "[::1]"))
+    print("  redaction " + ("on for MCP (PILE_REDACT)" if redact.enabled() else "off: agents see real names")
+          + ("; your triage model is in the cloud, so consider PILE_REDACT=1 / `pile mcp --redact`" if cloud and not redact.enabled() else ""))
     from . import envfile
     print("  settings from: %s" % (", ".join(("~" + f[len(home):]) if f.startswith(home) else f for f in envfile.LOADED)
                                    or "environment only (none of ~/.config/pile/env, ./.env)"))
@@ -68,7 +73,13 @@ def main(argv=None):
     sv.add_argument("--watch", type=int, default=30, help="collect every N seconds while serving (0 = off)")
     sv.add_argument("--listen", default="127.0.0.1",
                     help="address to bind; 0.0.0.0 lets phones on your LAN POST /ingest (the UI stays local-only)")
-    sub.add_parser(parents=[common], name="mcp", help="MCP server on stdio, for Claude and other agents")
+    mc = sub.add_parser(parents=[common], name="mcp", help="MCP server on stdio, for Claude and other agents")
+    mc.add_argument("--redact", action="store_true",
+                    help="agents see pseudonyms instead of names and contacts, and no secrets (also PILE_REDACT=1)")
+    ex = sub.add_parser(parents=[common], name="export", help="dump items, e.g. redacted for a bug report or demo")
+    ex.add_argument("--redacted", action="store_true", help="pseudonyms for people, no secrets or contacts")
+    ex.add_argument("--json", action="store_true")
+    ex.add_argument("--state", default="all", choices=["new", "done", "snoozed", "all"])
     sub.add_parser(parents=[common], name="triage", help="label new items: your rules first, then a model if configured")
     sub.add_parser(parents=[common], name="rules", help="print what pile has learned")
     ls = sub.add_parser(parents=[common], name="list", help="print the inbox")
@@ -124,7 +135,8 @@ def main(argv=None):
         server.serve(s, args.port, 0 if args.demo else args.watch, dict(kw, demo=True) if args.demo else kw, args.listen)
     elif args.cmd == "mcp":
         from . import mcp
-        mcp.serve(s)
+        from . import redact
+        mcp.serve(s, redact=args.redact or redact.enabled())
     elif args.cmd == "triage":
         r = triage.run(s)
         if not r["model"]:
@@ -146,6 +158,20 @@ def main(argv=None):
             print("%s  %-8s %5s  %-10s %-22s %s" % (time.strftime("%m-%d %H:%M", time.localtime(r["at"])), r["action"],
                                                   r["item_id"] or "", (r["app_name"] or "")[:10],
                                                   (r["sender"] or r["title"] or "")[:22], what[:60]))
+    elif args.cmd == "export":
+        items = s.items(args.state, limit=100000)
+        if args.redacted:
+            from .redact import Redactor
+            r = Redactor(s)
+            items = [r.item(i) for i in items]
+        keep = ("id", "source", "app", "app_name", "thread", "sender", "title", "body", "at", "state", "label", "tag", "link")
+        items = [{k: i.get(k) for k in keep} for i in items]
+        if args.json:
+            print(json.dumps(items, ensure_ascii=False, indent=1))
+        else:
+            for i in items:
+                print("%s  %-10s %-14s %s" % (time.strftime("%m-%d %H:%M", time.localtime(i["at"])), i["app_name"][:10],
+                                              (i["sender"] or "")[:14], (i["title"] + " " + i["body"]).strip()[:90]))
     elif args.cmd == "open-test":
         from .actions import open_test
         r = open_test(s, args.id)

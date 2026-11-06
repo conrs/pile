@@ -115,7 +115,9 @@ body.private .pickblock{background:rgba(255,181,71,.2)}
 /* Screen-share mode (p): blur who and what, keep the shape of the inbox. */
 body.private .who,body.private .l2,body.private .av,body.private .card code,body.private .card b,body.private #fixurl,
 body.private .rule .v,body.private .rule b,body.private .learned{filter:blur(9px)}
-body.private.keep-github .row.src-github .who,body.private.keep-github .row.src-github .av{filter:none}
+body.private.names .who,body.private.names .l2,body.private.names .av{filter:none}
+body.private.keep-github .row.src-github .who,body.private.names .who,body.private.names .l2,body.private.names .av{filter:none}
+body.private.keep-github .row.src-github .av{filter:none}
 .privbadge{display:none;font-size:11px;font-weight:700;color:var(--accent-ink);background:var(--accent);border-radius:6px;padding:2px 7px}
 body.private .privbadge{display:inline-block}
 @media (max-width:560px){.keys{display:none}.app{display:none}}
@@ -130,6 +132,7 @@ body.private .privbadge{display:inline-block}
     </div>
     <div class="count" id="count"></div>
     <span class="count" id="picked"></span>
+    <span class="privbadge" id="agentmode" style="display:none;background:var(--raise);color:var(--dim)" title="pile mcp runs with --redact: agents see pseudonyms, no secrets">agents: redacted</span>
     <span class="privbadge" title="Screen-share mode: names and messages are blurred (p)">private</span>
     <div class="spacer"></div>
     <button class="pill" id="undoBtn" title="Undo (z); Shift+Z redoes">Undo</button>
@@ -153,9 +156,11 @@ body.private .privbadge{display:inline-block}
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
-const S = {follow: new URLSearchParams(location.search).has("follow"), expanded: null, toggled: new Set(), anchor: null, items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
+const S = {names: new URLSearchParams(location.search).get("private") === "names", follow: new URLSearchParams(location.search).has("follow"), expanded: null, toggled: new Set(), anchor: null, items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
 const SOURCES = {macos: "Notifications", windows: "Notifications", linux: "Notifications", github: "GitHub", imap: "Mail",
   mailapp: "Apple Mail", messages: "Messages", webhook: "Webhook", demo: "Demo"};
+// ?private=names: show stable pseudonyms (Person-7f3a) instead of blurring.
+function F(it, k){ return S.names && it.r ? it.r[k] : it[k]; }
 function srcLabel(k){
   if (SOURCES[k]) return SOURCES[k];
   const it = S.items.find(x => x.source === k);  // e.g. "Gmail · work" for an IMAP account
@@ -207,7 +212,9 @@ async function load(){
   const seq = ++loadSeq;
   const q = new URLSearchParams({state: ["unanswered", "sift"].includes(S.view) ? "new" : S.view});
   if (S.source) q.set("source", S.source);
+  if (S.names) q.set("names", "1");
   const j = await api("/api/items?" + q);
+  $("#agentmode").style.display = j.redact ? "inline-block" : "none";
   if (seq !== loadSeq || S.pending) return;  // a newer load, or an action still on its way to the server
   const before = current(), key = before && before.lead.thread;
   S.items = j.items; S.stats = j.stats;
@@ -259,7 +266,7 @@ function render(){
     return;
   }
   $("#list").innerHTML = `<div class="list">` + gs.map((g, i) => {
-    const it = g.lead, name = it.sender || it.app_name;
+    const it = g.lead, name = F(it, "sender") || it.app_name;
     const ask = S.asked === it.id ? `<div class="ask">Did that land in the right place? <button data-act="yes"><kbd>y</kbd> Yes</button><button data-act="no"><kbd>n</kbd> No, fix it</button></div>` : "";
     return `<div class="row src-${esc(it.source)} ${i === S.sel ? "sel" : ""} ${P.has(it.thread) ? "picked" : ""} ${it.label === "noise" ? "noiserow" : ""}" data-i="${i}">
       <div class="av" style="background:${color(it.app_name)}">${esc(it.app_name[0] || "?")}</div>
@@ -267,8 +274,8 @@ function render(){
         ${it.label ? `<span class="chip ${esc(it.label)}">${esc(it.label)}</span>` : ""}
         ${it.tag && it.tag !== "sift" ? `<span class="chip tag ${esc(it.tag)}">${esc(it.tag)}</span>` : ""}
         ${it.link_learned ? `<span class="learned" title="${esc(it.link)}">● learned link</span>` : ""}</div>
-        <div class="l2">${it.title ? `<span class="t">${esc(it.title)}</span> — ` : ""}${esc(it.body)}</div>
-        ${g.items.length > 1 ? g.items.slice(1, 5).map(x => `<div class="l2 older"><span class="t">${esc(x.sender || x.app_name)}</span> ${esc(x.body)} <span class="when">${ago(x.at)}</span></div>`).join("") + (g.items.length > 5 ? `<div class="l2 older">+${g.items.length - 5} more</div>` : "") : ""}</div>
+        <div class="l2">${it.title ? `<span class="t">${esc(F(it, "title"))}</span> — ` : ""}${esc(F(it, "body"))}</div>
+        ${g.items.length > 1 ? g.items.slice(1, 5).map(x => `<div class="l2 older"><span class="t">${esc(F(x, "sender") || x.app_name)}</span> ${esc(F(x, "body"))} <span class="when">${ago(x.at)}</span></div>`).join("") + (g.items.length > 5 ? `<div class="l2 older">+${g.items.length - 5} more</div>` : "") : ""}</div>
       <div class="acts">
         <button data-a="open" title="Open (o)">Open</button><button data-a="done" title="${S.view === "done" ? "Back to inbox (e)" : "Done (e)"}">${S.view === "done" ? "Undone" : "Done"}</button>
         <button data-a="snooze" title="Snooze (s)">Snooze</button><button data-a="imp" title="Always important (+)">+</button>
@@ -368,6 +375,7 @@ async function followLoop(){
       if (fresh) {
         const q = new URLSearchParams({state: ["unanswered", "sift"].includes(S.view) ? "new" : S.view});
         if (S.source) q.set("source", S.source);
+        if (S.names) q.set("names", "1");
         const j = await api("/api/items?" + q);
         S.items = j.items; S.stats = j.stats;
       }
@@ -671,6 +679,7 @@ function setPrivate(on){
   try { on = on || sessionStorage.getItem("pile.private") === "1"; } catch (e) {}
   setPrivate(on);
   if (q.get("keep") === "github") document.body.classList.add("keep-github");
+  if (S.names) { document.body.classList.add("names"); const b = document.querySelector(".privbadge:not(#agentmode)"); if (b) b.textContent = "private · pseudonyms"; }
 })();
 load(); loadRules();
 if (S.follow) followLoop();

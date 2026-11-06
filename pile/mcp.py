@@ -67,7 +67,68 @@ def _brief(item: dict) -> dict:
     return out
 
 
+REDACTOR = None  # set by serve(redact=True): every output redacted, pseudonyms accepted as input
+
+
+def _unmap_args(a: dict) -> dict:
+    r = REDACTOR
+    a = dict(a)
+    if "url" in a:
+        a["url"] = r.unmap_text(a["url"])
+    if isinstance(a.get("match"), dict):
+        a["match"] = {k: (r.unmap(v) or v) if isinstance(v, str) else v for k, v in a["match"].items()}
+    if isinstance(a.get("value"), str):
+        a["value"] = r.unmap(a["value"]) or r.unmap_text(a["value"])
+    return a
+
+
+def _redact_out(name: str, out):
+    r = REDACTOR
+    r._people = None  # pick up new senders
+    if name in ("list_inbox",):
+        out = dict(out, items=[r.item(i) for i in out["items"]])
+    elif name == "get_item":
+        out = r.item(out)
+    elif name == "history":
+        rows = []
+        for h in out["actions"]:
+            h = dict(h)
+            person = r.is_person({"sender": h.get("sender"), "app_name": h.get("app_name"), "app": ""})
+            names = [h["sender"]] if person else []
+            if person:
+                h["sender"] = r.pseudonym(h["sender"])
+            h["title"] = r.text(h.get("title") or "", names)
+            h["detail"] = json.loads(r.text(json.dumps(h.get("detail") or {}), names))
+            rows.append(h)
+        out = {"actions": rows}
+    elif name in ("list_rules", "set_rule", "fix_link"):
+        def rule(x):
+            x = dict(x)
+            if x.get("sender"):
+                x["sender"] = r.pseudonym(x["sender"], "Thread")
+            x["note"] = r.text(x.get("note") or "", [x.get("note", "").replace("learned from: ", "")])
+            x["value"] = r.text(x.get("value") or "")
+            return x
+        if name == "list_rules":
+            out = {"rules": [rule(x) for x in out["rules"]]}
+        elif name == "set_rule":
+            out = rule(out)
+        else:
+            out = dict(out, rule=rule(out["rule"]), now_opens=r.text(out["now_opens"]), scope=r.text(out["scope"]))
+    elif name in ("open_item",):
+        out = dict(out, link=r.text(out.get("link", "")), result=r.text(out.get("result", "")))
+    elif name in ("undo", "redo"):
+        out = json.loads(r.text(json.dumps(out)))
+    return out
+
+
 def call(store, name: str, a: dict):
+    if REDACTOR is not None:
+        return _redact_out(name, _call(store, name, _unmap_args(a)))
+    return _call(store, name, a)
+
+
+def _call(store, name: str, a: dict):
     if name == "list_inbox":
         items = store.items(a.get("state", "new"), a.get("source"), a.get("label"), 2000 if a.get("tag") else int(a.get("limit", 50)))
         if a.get("tag"):
@@ -114,7 +175,7 @@ def handle(store, msg: dict):
             result = {"protocolVersion": ver, "capabilities": {"tools": {}},
                       "serverInfo": {"name": "pile", "version": __version__},
                       "instructions": "pile is the user's unified inbox: every notification and unread item. "
-                      "Use list_inbox to see it, then mark_done/snooze/open_item. When the user corrects you "
+                      "Use list_inbox to see it, then mark_done/snooze/open_item." + (" Names, contacts and secrets are redacted: people appear as stable pseudonyms like Person-7f3a; use them and item ids freely, pile maps them back locally." if REDACTOR is not None else "") + " When the user corrects you "
                       "(wrong link, wrong importance), teach pile with fix_link or set_rule."}
         elif method == "ping":
             result = {}
@@ -134,7 +195,11 @@ def handle(store, msg: dict):
         return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32603, "message": str(e)}}
 
 
-def serve(store, stdin=None, stdout=None) -> None:
+def serve(store, stdin=None, stdout=None, redact: bool = False) -> None:
+    global REDACTOR
+    if redact:
+        from .redact import Redactor
+        REDACTOR = Redactor(store)
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     for line in stdin:
         line = line.strip()
