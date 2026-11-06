@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -161,11 +162,20 @@ def serve(store, port=8765, watch=0, collect_kwargs=None, host="127.0.0.1"):
     if watch:
         def loop():
             ev = threading.Event()
+            said = {}  # each collector's error is printed once, not every 30 s
             while True:
-                with lock:
-                    counts = collectors.run_all(store, quiet=True, **collect_kwargs)
-                if any(isinstance(v, int) and v for v in counts.values()):
-                    presence.changed()
+                try:  # anything outside a collector (a locked database) used to end this thread for good
+                    with lock:
+                        counts = collectors.run_all(store, quiet=True, **collect_kwargs)
+                    for name, v in counts.items():
+                        err = v if isinstance(v, str) and v.startswith("error") else None
+                        if err and err != said.get(name):
+                            print("pile: %s: %s" % (name, err), file=sys.stderr)
+                        said[name] = err
+                    if any(isinstance(v, int) and v for v in counts.values()):
+                        presence.changed()
+                except Exception as e:
+                    print("pile: collect failed, trying again in %ds: %s" % (watch, e), file=sys.stderr)
                 ev.wait(watch)
         threading.Thread(target=loop, daemon=True).start()
     httpd = ThreadingHTTPServer((host, port), make_handler(store, lock, collect_kwargs, presence))
