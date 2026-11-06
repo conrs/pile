@@ -268,6 +268,9 @@ function clearPicks(){ S.toggled.clear(); S.anchor = null; }
 async function act(kind, until){
   const gs = targets(); if (!gs.length) return;
   const ids = gs.flatMap(g => g.items.map(x => x.id));
+  // The rows go away, so the cursor lands on whatever followed the first of them, not on the old index.
+  const keys = groups().map(g => g.lead.thread), at = gs.map(g => keys.indexOf(g.lead.thread)).filter(i => i >= 0);
+  if (at.length) S.sel = Math.min(...at);
   clearPicks();
   const inbox = ["new", "unanswered", "sift"].includes(S.view);
   if (kind === "done") { await api(inbox ? "/api/done" : "/api/reopen", {ids}); toast(inbox ? "Done" + (ids.length > 1 ? ` (${ids.length})` : "") : "Back in the inbox"); }
