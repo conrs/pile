@@ -62,7 +62,7 @@ k j; sleep 0.4; k j; sleep 0.4; k k; sleep 0.4
 k o; sleep 0.9; k y; sleep 0.6
 k e; sleep 0.7
 k s; sleep 0.8; k t; sleep 1.0
-for _ in $(seq 1 22); do k e; sleep 0.3; done
+for _ in $(seq 1 30); do k e; sleep 0.3; done
 sleep 2.4
 mark end
 stop
