@@ -442,6 +442,7 @@ async function act(kind, until){
   // The rows go away, so the cursor lands on whatever followed the first of them, not on the old index.
   const keys = groups().map(g => g.lead.thread), at = gs.map(g => keys.indexOf(g.lead.thread)).filter(i => i >= 0);
   if (at.length) S.sel = Math.min(...at);
+  S.lastBatch = gs.length > 1 ? gs.map(g => g.lead.thread) : null; // undo hands the selection back
   clearPicks();
   const inbox = ["new", "unanswered", "sift"].includes(S.view);
   if (kind === "done") {
@@ -554,6 +555,8 @@ async function undoRedo(which){
   if (isPrivate()) what = what.split(" · ")[0];
   const left = which === "undo" ? r.remaining : r.redoable;
   toast((which === "undo" ? "Undid: " : "Redid: ") + what + (left ? ` (${left} more)` : ""));
+  if (which === "undo" && S.lastBatch) { clearPicks(); S.lastBatch.forEach(t => S.toggled.add(t)); }
+  S.lastBatch = null;
   await loadRules(); await load();
 }
 
