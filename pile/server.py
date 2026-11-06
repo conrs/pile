@@ -24,7 +24,8 @@ def make_handler(store, lock, collect_kwargs):
             "/api/label": lambda b: actions.teach_label(store, b["id"], b["label"], b.get("scope", "sender")),
             "/api/mute": lambda b: actions.mute_app(store, b["id"]),
             "/api/rules/delete": lambda b: {"deleted": rules.delete(store, b["id"])},
-            "/api/collect": lambda b: collectors.run_all(store, quiet=True, **collect_kwargs),
+            "/api/collect": lambda b: ({"demo": 0} if collect_kwargs.get("demo")
+                                       else collectors.run_all(store, quiet=True, **collect_kwargs)),
             "/api/triage": lambda b: triage.run(store),
         }
 

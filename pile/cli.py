@@ -1,4 +1,4 @@
-"""pile collect | watch | serve | mcp | triage | rules | demo"""
+"""pile: one local inbox for every notification and unread."""
 from __future__ import annotations
 
 import argparse
@@ -15,6 +15,9 @@ def open_store(args):
     if args.demo and not path:
         path = os.path.join(os.path.dirname(store.default_path()), "demo.db")
     s = store.Store(path)
+    if args.demo and args.cmd == "serve":  # every demo starts fresh, with times relative to now
+        s.db.execute("DELETE FROM items")
+        s.db.execute("DELETE FROM rules")
     if args.demo and not s.db.execute("SELECT 1 FROM items LIMIT 1").fetchone():
         demo.seed(s)
     return s
@@ -88,7 +91,7 @@ def main(argv=None):
             time.sleep(args.every)
     elif args.cmd == "serve":
         from . import server
-        server.serve(s, args.port, 0 if args.demo else args.watch, kw, args.listen)
+        server.serve(s, args.port, 0 if args.demo else args.watch, dict(kw, demo=True) if args.demo else kw, args.listen)
     elif args.cmd == "mcp":
         from . import mcp
         mcp.serve(s)
