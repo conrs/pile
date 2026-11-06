@@ -2,6 +2,8 @@
 
 Take back your inbox.
 
+![pile: their pings, one local inbox, you and any agent](docs/overview.png)
+
 You have accounts on a ton of platforms to keep up with. They want to keep you on them, so they make it hard to leave. But we can use their own greed against them: they all send push notifications and emails to pull you back in. pile catches those and builds one inbox from them, so you can skip their crappy UIs and actually get your job done.
 
 [![MIT](https://img.shields.io/badge/license-MIT-ffb547)](LICENSE)
