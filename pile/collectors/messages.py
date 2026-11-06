@@ -10,7 +10,7 @@ import os
 import re
 import sqlite3
 import time
-from typing import Optional
+from typing import Optional, Tuple
 
 NAME = "messages"
 PLATFORMS = ("darwin",)
@@ -153,3 +153,68 @@ def backfill(store, days: float = 30, messages_db: Optional[str] = None, **_) ->
         if store.upsert(to_item(r, names)):
             n += 1
     return n
+
+
+# ---- opening the right conversation ----
+# Notification Center only says who wrote (a name) and, for groups, the group's name. chat.db knows the
+# conversation: match the notification's text and time to a message there.
+
+def _chat_link(r, cols) -> Tuple[str, list]:
+    """Best link for a chat row, plus the other variants worth trying."""
+    group = r["members"] > 1 or r["style"] == 43
+    variants = ["messages://open?message-guid=" + r["mguid"], "sms:/open?message-guid=" + r["mguid"]]
+    if group:
+        return variants[0], variants[1:] + ["bundle:" + APP]
+    handle = r["handle"] or r["chat_identifier"] or ""
+    sms = "service_name" in cols and (r["service_name"] or "").upper() == "SMS"
+    primary = ("sms:" if sms or "@" not in handle and not handle.startswith("e:") else "imessage://") + handle
+    if not sms and "@" not in handle:
+        variants.insert(0, "imessage://" + handle)
+    return primary, variants + ["bundle:" + APP]
+
+
+def resolve(item: dict, path: Optional[str] = None) -> Tuple[Optional[str], str, list]:
+    """(link, why, other variants) for a Messages notification, or (None, why, [])."""
+    path = path or default_db()
+    if not path:
+        return None, "no chat.db (macOS only, needs Full Disk Access)", []
+    db = _open(path)
+    db.row_factory = sqlite3.Row
+    try:
+        cols = {r["name"] for r in db.execute("PRAGMA table_info(chat)")}
+        svc = "c.service_name" if "service_name" in cols else "NULL"
+        biggest = db.execute("SELECT MAX(date) FROM message").fetchone()[0] or 0
+        scale = 1e9 if biggest > 1e12 else 1
+        at = (float(item.get("at") or 0) - MAC_EPOCH) * scale
+        window = 600 * scale
+        rows = db.execute(
+            "SELECT c.ROWID chat, c.guid, c.chat_identifier, c.display_name, c.style, " + svc + " service_name,"
+            " m.guid mguid, m.text, m.date, h.id handle,"
+            " (SELECT COUNT(*) FROM chat_handle_join chj WHERE chj.chat_id = c.ROWID) members"
+            " FROM message m JOIN chat_message_join cmj ON cmj.message_id = m.ROWID JOIN chat c ON c.ROWID = cmj.chat_id"
+            " LEFT JOIN handle h ON h.ROWID = m.handle_id"
+            " WHERE m.is_from_me = 0 AND m.date BETWEEN ? AND ?", (at - window, at + window)).fetchall()
+        group_name = (item.get("title") or "").strip()
+        body = (item.get("body") or "").strip()
+        if group_name:
+            rows = [r for r in rows if (r["display_name"] or "") == group_name] or rows
+        same_text = [r for r in rows if body and (r["text"] or "").strip() == body]
+        pool, why = (same_text, "matched the message text") if same_text else (rows, "nearest message in time")
+        if pool:
+            best = min(pool, key=lambda r: abs(r["date"] - at))
+            link, variants = _chat_link(best, {"service_name"} if svc != "NULL" else set())
+            return link, "%s (chat %s)" % (why, best["guid"]), variants
+        # No message near that time: fall back to the person's 1:1 chat by name or handle.
+        sender = (item.get("sender") or "").strip()
+        names = {v.lower(): k for k, v in contact_names().items()}
+        want = {sender.lower(), names.get(sender.lower(), "")} - {""}
+        for r in db.execute("SELECT c.ROWID chat, c.guid, c.chat_identifier, c.display_name, c.style, " + svc +
+                            " service_name, '' mguid, h.id handle, 1 members FROM chat c JOIN chat_handle_join chj"
+                            " ON chj.chat_id = c.ROWID JOIN handle h ON h.ROWID = chj.handle_id"):
+            if (r["handle"] or "").lower() in want or (_digits(r["handle"] or "") and _digits(r["handle"]) in {_digits(w) for w in want}):
+                handle = r["handle"]
+                return (("sms:" if "@" not in handle else "imessage://") + handle, "matched the sender's handle",
+                        ["bundle:" + APP])
+        return None, "no matching conversation in chat.db", []
+    finally:
+        db.close()

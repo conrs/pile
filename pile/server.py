@@ -19,7 +19,7 @@ def make_handler(store, lock, collect_kwargs):
             "/api/done": lambda b: actions.done(store, b["ids"]),
             "/api/reopen": lambda b: actions.reopen(store, b["ids"]),
             "/api/snooze": lambda b: actions.snooze(store, b["ids"], b["until"]),
-            "/api/open": lambda b: actions.open_item(store, b["id"]),
+            "/api/open": lambda b: actions.open_item(store, b["id"], bool(b.get("browser_opened"))),
             "/api/fix_link": lambda b: actions.fix_link(store, b["id"], b["url"]),
             "/api/label": lambda b: actions.teach_labels(store, b.get("ids") or [b["id"]], b["label"], b.get("scope", "sender")),
             "/api/mute": lambda b: actions.mute_apps(store, b.get("ids") or [b["id"]]),

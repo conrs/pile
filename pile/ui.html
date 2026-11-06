@@ -249,12 +249,18 @@ async function act(kind, until){
   if (kind === "snooze") { const r = await api("/api/snooze", {ids, until}); toast("Snoozed until " + new Date(r.until).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})); }
   await load();
 }
+// Web links open right here, inside the keypress or click (a window.open after an await is a blocked popup).
+// Everything else (sms:, slack://, an app) goes to the server, which runs macOS `open`.
 async function openSel(){
   const g = current(); if (!g) return;
-  const r = await api("/api/open", {id: g.lead.id});
-  if (/macOS only/.test(r.result) && /^https?:/.test(r.link)) window.open(r.link, "_blank", "noopener");
-  S.asked = g.lead.id; render();
-  toast(r.learned ? "Opened (learned link)" : "Opened");
+  const it = g.lead;
+  const web = /^https?:\/\//.test(it.link);
+  if (web) window.open(it.link, "_blank", "noopener");
+  S.asked = it.id; render();
+  try {
+    const r = await api("/api/open", {id: it.id, browser_opened: web});
+    toast((r.learned ? "Opened (learned link)" : "Opened") + (/couldn't|would/.test(r.result) ? ": " + r.result : ""));
+  } catch (err) { toast("Couldn't open: " + err.message); }
 }
 
 function modal(html, onkey){ $("#popcard").innerHTML = html; $("#pop").classList.add("show"); modal.onkey = onkey; const inp = $("#popcard input"); if (inp) inp.focus(); }
@@ -407,7 +413,8 @@ document.addEventListener("keydown", e => {
     case "K": pick(S.sel, true); S.sel = Math.max(0, S.sel - 1); pick(S.sel, true); S.asked = null; render(); break;
     case "x": pick(S.sel); S.anchor = S.sel; render(); break;
     case "Escape": if (S.picked.size) { clearPicks(); render(); } break;
-    case "o": case "Enter": openSel(); break;
+    case "o": openSel(); break;
+    case "Enter": if (e.target.tagName !== "BUTTON") openSel(); break;
     case "e": act("done"); break;
     case "s": if (S.view !== "done") snoozeMenu(); break;
     case "/": e.preventDefault(); filter.style.display = "block"; filter.focus(); break;

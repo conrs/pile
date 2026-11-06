@@ -73,6 +73,8 @@ def main(argv=None):
     hi = sub.add_parser(parents=[common], name="history", help="what you did, newest first")
     hi.add_argument("--limit", type=int, default=50)
     hi.add_argument("--json", action="store_true")
+    ot = sub.add_parser(parents=[common], name="open-test", help="show which link `open` would use for an item, and why")
+    ot.add_argument("id", type=int)
     un = sub.add_parser(parents=[common], name="undo", help="undo the last change (repeat to go further back)")
     un.add_argument("--steps", type=int, default=1)
     rd = sub.add_parser(parents=[common], name="redo", help="redo what undo undid")
@@ -136,6 +138,15 @@ def main(argv=None):
             print("%s  %-8s %5s  %-10s %-22s %s" % (time.strftime("%m-%d %H:%M", time.localtime(r["at"])), r["action"],
                                                   r["item_id"] or "", (r["app_name"] or "")[:10],
                                                   (r["sender"] or r["title"] or "")[:22], what[:60]))
+    elif args.cmd == "open-test":
+        from .actions import open_test
+        r = open_test(s, args.id)
+        print("item %(id)s: %(app)s · %(sender)s %(title)s" % r)
+        print("would open: %s%s" % (r["link"], " (learned)" if r["learned"] else ""))
+        if r["was"] != r["link"]:
+            print("was:        " + r["was"])
+        for w in r["why"]:
+            print("why:        " + w)
     elif args.cmd in ("undo", "redo"):
         r = s.undo(args.steps) if args.cmd == "undo" else s.redo(args.steps)
         for what in r["undid" if args.cmd == "undo" else "redid"] or ["nothing to %s" % args.cmd]:

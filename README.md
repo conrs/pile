@@ -39,18 +39,24 @@ That adds Messages conversations where they spoke last and you never replied, op
 
 ## Keys
 
+![pile keys](docs/keys.png)
+
 | | | | |
 |---|---|---|---|
-| `j` `k` move | `o` open the thread | `e` done | `s` snooze (hour, tonight, tomorrow, next week) |
-| `/` filter | `!` always important from them | `-` not important | `l` fix where it opens |
-| `m` mute this app | `u` undo | `?` what it's learned | `0`-`9` filter by source |
-| `g` same conversation as... | `G` ungroup | `p` screen-share mode | `r` collect now |
+| `j` `k` move | `o` / Enter open | `e` done | `s` snooze (hour, tonight, tomorrow, next week) |
+| `+` always important | `-` not important | `f` fix where it opens | `c` combine rows into one conversation, `C` split |
+| `x` select, `Shift`+`j`/`k` extend | `m` mute this app | `/` filter | `z` undo (again and again), `Shift`+`Z` redo |
+| `?` what it's learned | `p` screen-share mode | `0`-`9` filter by source | `r` collect now |
 
-Items from the same conversation group into one row (pile uses the thread id apps attach to their notifications, so a group text is one row); select it to see the earlier messages, and `e` clears the whole row. If two rows are really one conversation, `g` folds one into the other and pile remembers it.
+With rows selected (`x`, `Shift`+`j`/`k`, Shift-click, Cmd/Ctrl-click), `e`, `s`, `+`, `-`, `m` and `c` act on all of them at once, as one step that one `z` undoes. Undo is a stack kept in the database, so it goes all the way back, even after a restart. Every action also has a button on the row, so a mouse or a touchscreen works too.
+
+Items from the same conversation group into one row (pile uses the thread id apps attach to their notifications, so a group text is one row); select it to see the earlier messages, and `e` clears the whole row. If several rows are really one conversation, select them and press `c`: they fold into the newest one, and pile remembers it.
 
 **Screen-share mode** (`p`, or open `/?private`) blurs every name, message and avatar so you can demo or stream your real inbox. `/?private&keep=github` leaves repo names readable.
 
-**History:** `pile history` lists what you did (open, done, snooze, labels, link fixes), newest first, `--json` for scripts. `pile reopen --since 2h` (or `--all`, `--source github`) puts cleared items back. `pile list --state done` shows what you cleared.
+**History:** `pile history` lists what you did (open, done, snooze, labels, link fixes), newest first, `--json` for scripts. `pile reopen --since 2h` (or `--all`, `--source github`) puts cleared items back. `pile list --state done` shows what you cleared. `pile undo` and `pile redo` work from the terminal too.
+
+**Opening Messages:** a Messages notification only names the sender, so pile looks the message up in `chat.db` (by its text and time) to open that exact conversation, and keeps the link. `pile open-test <id>` shows which link it would use and why.
 
 ## Platforms
 
@@ -119,14 +125,14 @@ Claude Desktop (`claude_desktop_config.json`):
 
 Then ask "which three of these matter?" or "snooze everything from GitHub until tomorrow".
 
-Tools: `list_inbox {source?, state?, label?, tag?, limit?}`, `history {limit?}`, `get_item {id}`, `mark_done {ids}`, `snooze {ids, until}`, `open_item {id}`, and for teaching it: `fix_link {id, url}`, `set_rule {kind, match, value}`, `list_rules`, `delete_rule {id}`.
+Tools: `list_inbox {source?, state?, label?, tag?, limit?}`, `history {limit?}`, `undo {steps?}`, `redo {steps?}`, `get_item {id}`, `mark_done {ids}`, `snooze {ids, until}`, `open_item {id}`, and for teaching it: `fix_link {id, url}`, `set_rule {kind, match, value}`, `list_rules`, `delete_rule {id}`.
 
 ## It learns from you
 
 ![fixing a deep link](docs/learning.gif)
 
 - **Links.** After you open something, pile asks whether it landed in the right place. Say no and paste where you ended up. If that URL contains the item's sender, title or id (as-is, URL-encoded or slugified), pile turns those into placeholders and the fix covers the whole app: paste `https://acme.slack.com/archives/launch` for `#launch` and every Slack channel item opens its own channel. Otherwise it keeps the fix to that person or thread. Learned links win over the built-in table and show a "learned link" mark.
-- **Importance.** `!` means always important from this sender, `-` means not important. These rules label new items before any model sees them, so they work with no model configured.
+- **Importance.** `+` means always important from this sender, `-` means not important. These rules label new items before any model sees them, so they work with no model configured.
 - **Mute.** `m` skips an app from now on and clears what's there.
 
 Everything learned is in the Learned panel (`?`), where you can delete any of it. Agents can read and write the same rules over MCP.

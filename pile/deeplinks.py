@@ -54,8 +54,11 @@ def default_link(bundle: str) -> str:
     return "bundle:" + bundle
 
 
-def open_link(link: str) -> str:
-    """Open a deep link on this machine. Returns what it did."""
+def open_link(link: str, fallback_bundle: str = "") -> str:
+    """Open a deep link on this machine. Returns what it did.
+
+    Runs `open` here, not from the browser page: browsers block or prompt for custom schemes
+    like sms: and imessage:. If macOS can't open the link, opens the app instead."""
     if not link:
         return "nothing to open"
     if os.environ.get("PILE_NO_OPEN"):  # dry run, for recordings and tests
@@ -71,7 +74,10 @@ def open_link(link: str) -> str:
             return "opened app " + link[len("bundle:"):]
         return "would open app " + link[len("bundle:"):] + " (macOS only)"
     if mac:
-        subprocess.run(["open", link], check=False)
+        r = subprocess.run(["open", link], check=False, capture_output=True)
+        if r.returncode != 0 and fallback_bundle:
+            subprocess.run(["open", "-b", fallback_bundle], check=False)
+            return "couldn't open %s; opened the app instead" % link
         return "opened " + link
     if link.startswith(("http://", "https://")):
         webbrowser.open(link)

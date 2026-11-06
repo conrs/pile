@@ -47,13 +47,54 @@ def reopen(store, ids) -> dict:
     return {"reopened": n}
 
 
-def open_item(store, item_id) -> dict:
+def open_item(store, item_id, browser_opened: bool = False) -> dict:
+    """Open an item's link here. browser_opened: the web page already opened an http(s) link itself."""
     item = store.get(item_id)
     if not item:
         raise KeyError("no item %s" % item_id)
-    did = deeplinks.open_link(item["link"])
+    item = resolve_messages(store, item)
+    bundle = item["app"] if "." in item["app"] and not item["app"].startswith("_") else ""
+    if browser_opened and item["link"].startswith(("http://", "https://")):
+        did = "opened in the browser"
+    else:
+        did = deeplinks.open_link(item["link"], bundle)
     store.log("open", [item["id"]], link=item["link"], learned=item["link_learned"])
     return {"id": item["id"], "link": item["link"], "learned": item["link_learned"], "result": did}
+
+
+GENERIC_MESSAGES = ("", "sms:", "bundle:com.apple.MobileSMS")
+
+
+def resolve_messages(store, item: dict, why: list = None) -> dict:
+    """A Messages notification links to the app; find the actual conversation in chat.db and keep it."""
+    if item["app"] != "com.apple.MobileSMS" or item["link_learned"] or item["url"] not in GENERIC_MESSAGES:
+        if why is not None:
+            why.append("learned link" if item["link_learned"] else "already resolved" if item["app"] == "com.apple.MobileSMS"
+                       else "not a Messages item")
+        return item
+    from .collectors import messages
+    try:
+        link, reason, variants = messages.resolve(item)
+    except Exception as e:  # chat.db unreadable: keep the plain link
+        link, reason, variants = None, "chat.db: %s" % e, []
+    if why is not None:
+        why += [reason] + (["other variants: " + ", ".join(variants)] if variants else [])
+    if link:
+        store.db.execute("UPDATE items SET url=? WHERE id=?", (link, item["id"]))
+        item = store.get(item["id"])
+    return item
+
+
+def open_test(store, item_id) -> dict:
+    """What `open` would do for an item, and why. Opens nothing."""
+    item = store.get(item_id)
+    if not item:
+        raise KeyError("no item %s" % item_id)
+    why = []
+    before = item["link"]
+    item = resolve_messages(store, item, why)
+    return {"id": item["id"], "app": item["app"], "sender": item["sender"], "title": item["title"],
+            "link": item["link"], "learned": item["link_learned"], "was": before, "why": why}
 
 
 def fix_link(store, item_id, url) -> dict:
