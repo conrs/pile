@@ -91,3 +91,32 @@ class MessagesResolveTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PresenceTest(unittest.TestCase):
+    def test_follower_sees_driver_state_and_data_changes(self):
+        s = store.Store(":memory:")
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(s, threading.Lock(), {}))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        base = "http://127.0.0.1:%d" % httpd.server_address[1]
+
+        def post(path, body):
+            req = urllib.request.Request(base + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+            return json.loads(urllib.request.urlopen(req).read())
+
+        def get(path):
+            return json.loads(urllib.request.urlopen(base + path).read())
+        try:
+            post("/api/presence", {"sel": "slack|#launch", "view": "new"})
+            r = get("/api/presence?since=0&wait=1")
+            self.assertEqual(r["state"]["sel"], "slack|#launch")
+            seq, version = r["seq"], r["version"]
+            post("/api/done", {"ids": []})  # any write bumps the data version
+            r = get("/api/presence?since=%d&wait=1" % seq)
+            self.assertGreater(r["version"], version)
+            t = time.time()
+            get("/api/presence?since=%d&wait=0.3" % r["seq"])  # nothing new: waits, then answers
+            self.assertGreater(time.time() - t, 0.25)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
