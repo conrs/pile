@@ -53,6 +53,10 @@ def _text(v) -> str:
     return v.strip() if isinstance(v, str) else ""
 
 
+# Apps whose notification subtitle is the group conversation's name (title = who wrote).
+GROUP_CHAT_APPS = ("com.apple.MobileSMS", "net.whatsapp.WhatsApp", "org.whispersystems.signal-desktop", "ru.keepcoder.Telegram")
+
+
 def parse_record(rec_id: int, identifier: Optional[str], data: bytes, delivered: Optional[float]) -> Optional[dict]:
     try:
         pl = plistlib.loads(data)
@@ -70,6 +74,9 @@ def parse_record(rec_id: int, identifier: Optional[str], data: bytes, delivered:
     # The conversation id when the app sets one (Messages, Slack, Mail threads), else the title.
     tid = next((req.get(k) for k in ("thre", "thread", "srce") if isinstance(req.get(k), str) and req.get(k)), "")
     head = " · ".join(x for x in (title, subt) if x)
+    # Chat apps put the sender in the title and the group's name in the subtitle: one thread per group, not per sender.
+    if not tid and subt and app in GROUP_CHAT_APPS:
+        tid = "g:" + subt
     return {
         "source": NAME,
         "ext_id": str(pl.get("uuid") or rec_id) if not isinstance(pl.get("uuid"), bytes) else pl["uuid"].hex(),

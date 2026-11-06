@@ -67,6 +67,11 @@ class Store:
         for col, decl in (("tag", "TEXT"), ("changed_at", "REAL")):  # added after 0.1.0
             if col not in cols:
                 self.db.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
+        # 0.1.x grouped group chats by sender; re-key them by the group's name (kept in title).
+        from .collectors.macos import GROUP_CHAT_APPS
+        marks = ",".join("?" * len(GROUP_CHAT_APPS))
+        self.db.execute("UPDATE items SET thread = app || '|t:g:' || title WHERE source='macos' AND title != ''"
+                        " AND thread NOT LIKE '%|t:%' AND app IN (" + marks + ")", GROUP_CHAT_APPS)
 
     # ---- meta (watermarks) ----
     def get_meta(self, key: str, default: Optional[str] = None) -> Optional[str]:

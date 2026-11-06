@@ -46,6 +46,15 @@ class MacOSTest(unittest.TestCase):
     def test_garbage_plist_is_skipped(self):
         self.assertIsNone(macos.parse_record(1, "x", b"not a plist", 0))
 
+    def test_group_text_is_one_thread_whoever_writes(self):
+        import plistlib
+        def rec(sender):
+            return plistlib.dumps({"app": "com.apple.MobileSMS", "req": {"titl": sender, "subt": "Toyota Rav4", "body": "hi"}})
+        a, b = macos.parse_record(1, None, rec("David"), 0), macos.parse_record(2, None, rec("Michael"), 0)
+        self.assertEqual(a["thread"], b["thread"])
+        one = macos.parse_record(3, None, plistlib.dumps({"app": "com.apple.MobileSMS", "req": {"titl": "David", "body": "hi"}}), 0)
+        self.assertNotEqual(one["thread"], a["thread"])  # a 1:1 chat stays its own thread (control)
+
 
 class GitHubTest(unittest.TestCase):
     def setUp(self):
