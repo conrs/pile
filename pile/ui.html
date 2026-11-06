@@ -466,16 +466,16 @@ document.addEventListener("keydown", e => {
   }
 });
 
-// Screen-share mode: ?private (add &keep=github to leave public repo names readable), or press p.
+// Screen-share mode: ?private (add &keep=github to leave public repo names readable), or press p. Per tab (sessionStorage), so one window can stay clear while another is shared.
 function isPrivate(){ return document.body.classList.contains("private"); }
 function setPrivate(on){
   document.body.classList.toggle("private", on);
-  try { localStorage.setItem("pile.private", on ? "1" : ""); } catch (e) {}
+  try { sessionStorage.setItem("pile.private", on ? "1" : ""); } catch (e) {}
 }
 (function(){
   const q = new URLSearchParams(location.search);
   let on = q.has("private");
-  try { on = on || localStorage.getItem("pile.private") === "1"; } catch (e) {}
+  try { on = on || sessionStorage.getItem("pile.private") === "1"; } catch (e) {}
   setPrivate(on);
   if (q.get("keep") === "github") document.body.classList.add("keep-github");
 })();
