@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pile</title>
+<style>
+:root{
+  --bg:#0d0e11; --panel:#15171c; --raise:#1c1f26; --line:#262a33;
+  --text:#e8e9ec; --dim:#9096a1; --faint:#5d636e;
+  --accent:#ffb547; --accent-ink:#1a1206; --ok:#6fd49a;
+  --fyi:#8fa6c8; --noise:#555b66;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+kbd{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--raise);border:1px solid var(--line);
+  border-bottom-width:2px;border-radius:5px;padding:1px 5px;color:var(--text)}
+.wrap{max-width:880px;margin:0 auto;padding:22px 20px 90px}
+header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.logo{display:flex;align-items:center;gap:9px;font-weight:700;font-size:19px;letter-spacing:-.02em}
+.logo svg{display:block}
+.count{color:var(--dim);font-size:13px}
+.count b{color:var(--text)}
+.spacer{flex:1}
+.pill{padding:5px 10px;border-radius:999px;color:var(--dim);border:1px solid transparent;font-size:13px;white-space:nowrap}
+.pill:hover{color:var(--text)}
+.pill.on{color:var(--text);background:var(--raise);border-color:var(--line)}
+.pill .n{color:var(--faint);margin-left:5px;font-variant-numeric:tabular-nums}
+.pill.on .n{color:var(--accent)}
+.bar{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.bar .sep{width:1px;height:18px;background:var(--line);margin:0 6px}
+#filter{display:none;width:100%;margin:0 0 12px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;color:var(--text);font:inherit;outline:none}
+#filter:focus{border-color:var(--accent)}
+.list{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.row{display:grid;grid-template-columns:36px 1fr auto;gap:12px;padding:12px 16px 12px 14px;border-top:1px solid var(--line);
+  border-left:3px solid transparent;cursor:pointer;position:relative}
+.row:first-child{border-top:0}
+.row:hover{background:#181b21}
+.row.sel{background:var(--raise);border-left-color:var(--accent)}
+.av{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:700;font-size:14px;color:#0d0e11}
+.main{min-width:0}
+.l1{display:flex;align-items:baseline;gap:7px;min-width:0}
+.who{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app{color:var(--faint);font-size:12px;white-space:nowrap}
+.l2{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+.l2 .t{color:var(--text)}
+.side{display:flex;flex-direction:column;align-items:flex-end;gap:5px}
+.when{color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.more{font-size:11px;color:var(--dim);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:0 7px}
+.chip{font-size:11px;font-weight:600;border-radius:6px;padding:1px 7px;white-space:nowrap}
+.chip.needs-you{background:var(--accent);color:var(--accent-ink)}
+.chip.fyi{background:rgba(143,166,200,.15);color:var(--fyi)}
+.chip.noise{background:rgba(85,91,102,.18);color:var(--noise)}
+.learned{font-size:11px;color:var(--ok)}
+.row.noiserow .who,.row.noiserow .l2{opacity:.55}
+.ask{grid-column:2/4;display:flex;gap:10px;align-items:center;color:var(--dim);font-size:13px;
+  background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:7px 10px;margin-top:2px}
+.ask button{padding:2px 9px;border-radius:6px;background:var(--raise);border:1px solid var(--line)}
+.ask button:hover{border-color:var(--accent)}
+.zero{text-align:center;padding:90px 20px 100px;color:var(--dim)}
+.zero .big{font-size:34px;font-weight:700;color:var(--text);letter-spacing:-.03em;margin:16px 0 6px}
+.keys{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,var(--bg) 35%);padding:26px 16px 14px}
+.keys div{max-width:880px;margin:0 auto;display:flex;gap:14px;flex-wrap:wrap;color:var(--faint);font-size:12px;justify-content:center}
+.toast{position:fixed;left:50%;bottom:62px;transform:translateX(-50%);background:var(--text);color:var(--bg);
+  padding:8px 14px;border-radius:10px;font-weight:500;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
+.toast.show{opacity:1}
+.pop{position:fixed;inset:0;background:rgba(5,6,8,.6);display:none;align-items:flex-start;justify-content:center;padding-top:16vh;z-index:5}
+.pop.show{display:flex}
+.card{width:min(520px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.card h3{margin:0 0 4px;font-size:16px}
+.card p{margin:0 0 12px;color:var(--dim);font-size:13px}
+.card input{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:9px;color:var(--text);font:inherit;outline:none}
+.card input:focus{border-color:var(--accent)}
+.opts{display:flex;flex-direction:column;gap:6px}
+.opts button{display:flex;justify-content:space-between;text-align:left;padding:9px 12px;border-radius:9px;background:var(--bg);border:1px solid var(--line)}
+.opts button:hover{border-color:var(--accent)}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);background:var(--panel);border-left:1px solid var(--line);
+  transform:translateX(100%);transition:transform .2s;z-index:6;padding:20px;overflow:auto}
+.drawer.show{transform:none}
+.drawer h3{margin:0 0 4px}
+.rule{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:start;padding:10px 0;border-top:1px solid var(--line)}
+.rule .k{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);padding-top:2px}
+.rule .v{font:12px ui-monospace,Menlo,monospace;color:var(--dim);word-break:break-all;margin-top:2px}
+.rule button{color:var(--faint);font-size:16px;padding:0 4px}
+.rule button:hover{color:#ff7a7a}
+@media (max-width:560px){.keys{display:none}.app{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><rect x="3" y="14" width="18" height="6" rx="2" fill="#ffb547"/><rect x="5" y="8" width="14" height="5" rx="2" fill="#ffb547" opacity=".65"/><rect x="7" y="3" width="10" height="4" rx="2" fill="#ffb547" opacity=".35"/></svg>
+      pile
+    </div>
+    <div class="count" id="count"></div>
+    <div class="spacer"></div>
+    <button class="pill" id="learnedBtn" title="What pile has learned (?)">Learned <span class="n" id="nrules">0</span></button>
+    <button class="pill" id="refreshBtn" title="Collect now (r)">Refresh</button>
+  </header>
+  <div class="bar" id="views"></div>
+  <div class="bar" id="sources"></div>
+  <input id="filter" placeholder="Filter: person, app, words…  (Esc to clear)" autocomplete="off">
+  <div id="list"></div>
+</div>
+<div class="keys"><div>
+  <span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>o</kbd> open</span><span><kbd>e</kbd> done</span>
+  <span><kbd>s</kbd> snooze</span><span><kbd>/</kbd> filter</span><span><kbd>!</kbd> important</span>
+  <span><kbd>-</kbd> not important</span><span><kbd>l</kbd> fix link</span><span><kbd>m</kbd> mute app</span>
+  <span><kbd>u</kbd> undo</span><span><kbd>?</kbd> learned</span>
+</div></div>
+<div class="toast" id="toast"></div>
+<div class="pop" id="pop"><div class="card" id="popcard"></div></div>
+<div class="drawer" id="drawer"></div>
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const S = {items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
+const SOURCES = {macos: "Notifications", github: "GitHub", imap: "Mail", demo: "Demo"};
+const VIEWS = [["new", "Inbox"], ["snoozed", "Snoozed"], ["done", "Done"]];
+
+function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+const APPCOLOR = {Slack: "#d9a6f2", Messages: "#7ee08a", GitHub: "#cfd6de", Discord: "#8f9cff", Linear: "#f29ac0",
+  Gmail: "#ff8f7e", Mail: "#7ec8ff", Calendar: "#7ec8ff", Teams: "#9aa5ff", WhatsApp: "#6fdc8c", Telegram: "#6cc4f5"};
+function color(name){ return APPCOLOR[name] || `hsl(${hue(name)} 70% 70%)`; }
+function hue(s){ let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h % 360; }
+function ago(t){
+  const d = Date.now() / 1000 - t;
+  if (d < 60) return "now";
+  if (d < 3600) return Math.floor(d / 60) + "m";
+  if (d < 86400) return Math.floor(d / 3600) + "h";
+  return Math.floor(d / 86400) + "d";
+}
+function toast(msg){ const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 2600); }
+async function api(path, body){
+  const r = await fetch(path, body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+// One row per thread (a person, a channel, a PR): newest item leads, the rest count.
+function groups(){
+  const f = S.filter.toLowerCase();
+  const map = new Map();
+  for (const it of S.items) {
+    if (f && ![it.sender, it.title, it.body, it.app_name].join(" ").toLowerCase().includes(f)) continue;
+    const g = map.get(it.thread);
+    if (g) g.items.push(it); else map.set(it.thread, {lead: it, items: [it]});
+  }
+  return [...map.values()];
+}
+
+async function load(){
+  const q = new URLSearchParams({state: S.view});
+  if (S.source) q.set("source", S.source);
+  const j = await api("/api/items?" + q);
+  S.items = j.items; S.stats = j.stats;
+  render();
+}
+async function loadRules(){ S.rules = (await api("/api/rules")).rules; $("#nrules").textContent = S.rules.length; }
+
+function render(){
+  const st = S.stats;
+  $("#count").innerHTML = st.new ? `<b>${st.new}</b> new` + (st.labels && st.labels["needs-you"] ? ` · <b style="color:var(--accent)">${st.labels["needs-you"]}</b> need you` : "") : "all clear";
+  $("#views").innerHTML = VIEWS.map(([k, n]) => `<button class="pill ${S.view === k ? "on" : ""}" data-view="${k}">${n}<span class="n">${st[k] || 0}</span></button>`).join("");
+  const srcs = Object.entries(st.sources || {});
+  const total = srcs.reduce((a, [, n]) => a + n, 0);
+  $("#sources").innerHTML = S.view !== "new" ? "" :
+    `<button class="pill ${!S.source ? "on" : ""}" data-src="">All<span class="n">${total}</span></button>` +
+    srcs.map(([k, n], i) => `<button class="pill ${S.source === k ? "on" : ""}" data-src="${esc(k)}" title="${i + 1}">${esc(SOURCES[k] || k)}<span class="n">${n}</span></button>`).join("");
+  const gs = groups();
+  S.sel = Math.max(0, Math.min(S.sel, gs.length - 1));
+  if (!gs.length) {
+    const wake = st.next_wake ? new Date(st.next_wake * 1000).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}) : "";
+    $("#list").innerHTML = S.view === "new" && !S.filter ? `<div class="zero">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="30" stroke="#ffb547" stroke-width="3" opacity=".35"/><path d="M20 33l8 8 16-17" stroke="#ffb547" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="big">Inbox zero.</div><div>Nothing needs you right now.${st.snoozed ? ` ${st.snoozed} snoozed${wake ? ", next back " + esc(wake) : ""}.` : ""}</div></div>`
+      : `<div class="zero">Nothing here.</div>`;
+    return;
+  }
+  $("#list").innerHTML = `<div class="list">` + gs.map((g, i) => {
+    const it = g.lead, name = it.sender || it.app_name;
+    const ask = S.asked === it.id ? `<div class="ask">Did that land in the right place? <button data-act="yes"><kbd>y</kbd> Yes</button><button data-act="no"><kbd>n</kbd> No, fix it</button></div>` : "";
+    return `<div class="row ${i === S.sel ? "sel" : ""} ${it.label === "noise" ? "noiserow" : ""}" data-i="${i}">
+      <div class="av" style="background:${color(it.app_name)}">${esc(it.app_name[0] || "?")}</div>
+      <div class="main"><div class="l1"><span class="who">${esc(name)}</span><span class="app">${esc(it.app_name)}</span>
+        ${it.label ? `<span class="chip ${esc(it.label)}">${esc(it.label)}</span>` : ""}
+        ${it.link_learned ? `<span class="learned" title="${esc(it.link)}">● learned link</span>` : ""}</div>
+        <div class="l2">${it.title ? `<span class="t">${esc(it.title)}</span> — ` : ""}${esc(it.body)}</div></div>
+      <div class="side"><span class="when">${ago(it.at)}</span>${g.items.length > 1 ? `<span class="more">${g.items.length}</span>` : ""}</div>
+      ${ask}</div>`;
+  }).join("") + `</div>`;
+  const sel = document.querySelector(".row.sel");
+  if (sel) sel.scrollIntoView({block: "nearest"});
+}
+
+function current(){ return groups()[S.sel]; }
+async function act(kind, until){
+  const g = current(); if (!g) return;
+  const ids = g.items.map(x => x.id);
+  if (kind === "done") { await api(S.view === "new" ? "/api/done" : "/api/reopen", {ids}); toast(S.view === "new" ? "Done" + (ids.length > 1 ? ` (${ids.length})` : "") : "Back in the inbox"); }
+  if (kind === "snooze") { const r = await api("/api/snooze", {ids, until}); toast("Snoozed until " + new Date(r.until).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})); }
+  S.undo = {ids, view: S.view};
+  await load();
+}
+async function openSel(){
+  const g = current(); if (!g) return;
+  const r = await api("/api/open", {id: g.lead.id});
+  if (/macOS only/.test(r.result) && /^https?:/.test(r.link)) window.open(r.link, "_blank", "noopener");
+  S.asked = g.lead.id; render();
+  toast(r.learned ? "Opened (learned link)" : "Opened");
+}
+
+function modal(html, onkey){ $("#popcard").innerHTML = html; $("#pop").classList.add("show"); modal.onkey = onkey; const inp = $("#popcard input"); if (inp) inp.focus(); }
+function closeModal(){ $("#pop").classList.remove("show"); modal.onkey = null; }
+$("#pop").addEventListener("click", e => { if (e.target.id === "pop") closeModal(); });
+
+function snoozeMenu(){
+  modal(`<h3>Snooze until…</h3><p>Comes back to the inbox then.</p><div class="opts">
+    <button data-u="1h"><span>An hour</span><kbd>h</kbd></button>
+    <button data-u="tonight"><span>Tonight, 6pm</span><kbd>n</kbd></button>
+    <button data-u="tomorrow"><span>Tomorrow, 9am</span><kbd>t</kbd></button>
+    <button data-u="7d"><span>Next week</span><kbd>w</kbd></button></div>`,
+    k => { const u = {h: "1h", n: "tonight", t: "tomorrow", w: "7d"}[k]; if (u) { closeModal(); act("snooze", u); return true; } });
+  $("#popcard").onclick = e => { const b = e.target.closest("[data-u]"); if (b) { closeModal(); act("snooze", b.dataset.u); } };
+}
+function fixLink(){
+  const g = current(); if (!g) return;
+  const it = g.lead;
+  modal(`<h3>Where did you end up?</h3><p>Paste the link you landed on for <b>${esc(it.sender || it.title)}</b> in ${esc(it.app_name)} (a URL, an app link like slack://…, or a bundle id). pile will use it from now on.</p>
+    <input id="fixurl" placeholder="https://…" value=""><p style="margin:10px 0 0">Opened: <code style="color:var(--faint)">${esc(it.link)}</code></p>`,
+    null);
+  $("#fixurl").onkeydown = async e => {
+    if (e.key === "Enter" && e.target.value.trim()) {
+      e.preventDefault();
+      try { const r = await api("/api/fix_link", {id: it.id, url: e.target.value.trim()}); closeModal(); S.asked = null; toast("Learned for " + r.scope); await loadRules(); await load(); }
+      catch (err) { toast("Couldn't learn that: " + err.message); }
+    }
+    if (e.key === "Escape") closeModal();
+  };
+}
+async function teach(label){
+  const g = current(); if (!g) return;
+  const r = await api("/api/label", {id: g.lead.id, label});
+  toast((label === "noise" ? "Not important: " : "Always important: ") + (r.rule.note || "this sender"));
+  await loadRules(); await load();
+}
+function mute(){
+  const g = current(); if (!g) return;
+  const it = g.lead;
+  modal(`<h3>Mute ${esc(it.app_name)}?</h3><p>pile will skip everything from ${esc(it.app_name)} from now on, and clear what's here. Undo it in Learned.</p>
+    <div class="opts"><button data-m="1"><span>Mute ${esc(it.app_name)}</span><kbd>y</kbd></button><button data-m="0"><span>Cancel</span><kbd>esc</kbd></button></div>`,
+    k => { if (k === "y") { doMute(); return true; } });
+  $("#popcard").onclick = e => { const b = e.target.closest("[data-m]"); if (b) b.dataset.m === "1" ? doMute() : closeModal(); };
+  async function doMute(){ closeModal(); await api("/api/mute", {id: it.id}); toast("Muted " + it.app_name); await loadRules(); await load(); }
+}
+
+function describe(r){
+  const scope = r.sender ? esc(r.note.replace(/^learned from: /, "")) : (r.app ? "every item" : "everything");
+  const app = r.app ? esc(r.app) : "any app";
+  if (r.kind === "link") return `<div><b>${scope}</b> · ${app}</div><div class="v">→ ${esc(r.value)}</div>`;
+  if (r.kind === "label") return `<div><b>${scope}</b> is <span class="chip ${esc(r.value)}">${esc(r.value)}</span></div><div class="v">${app}</div>`;
+  return `<div><b>${esc(r.note || r.app)}</b> muted</div><div class="v">${app}</div>`;
+}
+async function drawer(show){
+  const d = $("#drawer");
+  if (!show) { d.classList.remove("show"); return; }
+  await loadRules();
+  d.innerHTML = `<h3>What I've learned</h3><p style="color:var(--dim);font-size:13px;margin:0 0 12px">From your corrections and your agents. Learned rules beat the built-in links and the model. <kbd>esc</kbd> closes.</p>` +
+    (S.rules.length ? S.rules.map(r => `<div class="rule"><span class="k">${esc(r.kind)}</span><div>${describe(r)}</div><button data-del="${r.id}" title="Forget">×</button></div>`).join("")
+      : `<p style="color:var(--faint)">Nothing yet. Press <kbd>l</kbd> on an item to fix where it opens, <kbd>!</kbd> or <kbd>-</kbd> to teach importance.</p>`);
+  d.classList.add("show");
+}
+$("#drawer").addEventListener("click", async e => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  await api("/api/rules/delete", {id: +b.dataset.del}); toast("Forgotten"); await drawer(true); await load();
+});
+
+document.addEventListener("click", e => {
+  const v = e.target.closest("[data-view]"); if (v) { S.view = v.dataset.view; S.sel = 0; load(); return; }
+  const s = e.target.closest("[data-src]"); if (s) { S.source = s.dataset.src; S.sel = 0; load(); return; }
+  const a = e.target.closest("[data-act]"); if (a) { a.dataset.act === "yes" ? (S.asked = null, render(), toast("Good")) : fixLink(); return; }
+  const r = e.target.closest(".row"); if (r) { S.sel = +r.dataset.i; render(); }
+});
+document.addEventListener("dblclick", e => { if (e.target.closest(".row")) openSel(); });
+$("#learnedBtn").onclick = () => drawer(true);
+$("#refreshBtn").onclick = async () => { const r = await api("/api/collect", {}); toast("Collected " + (Object.entries(r).map(([k, v]) => k + " " + v).join(", ") || "nothing configured")); load(); };
+
+const filter = $("#filter");
+filter.addEventListener("input", () => { S.filter = filter.value; S.sel = 0; render(); });
+filter.addEventListener("keydown", e => {
+  if (e.key === "Escape") { filter.value = ""; S.filter = ""; filter.style.display = "none"; filter.blur(); render(); }
+  if (e.key === "Enter" || e.key === "ArrowDown") { filter.blur(); }
+});
+
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if ($("#pop").classList.contains("show")) {
+    if (e.key === "Escape") { closeModal(); return; }
+    if (modal.onkey && e.target.tagName !== "INPUT" && modal.onkey(e.key)) e.preventDefault();
+    return;
+  }
+  if (e.target === filter) return;
+  if ($("#drawer").classList.contains("show")) { if (e.key === "Escape" || e.key === "?") drawer(false); return; }
+  const n = groups().length;
+  if (S.asked !== null && (e.key === "y" || e.key === "n")) { e.preventDefault(); if (e.key === "y") { S.asked = null; render(); toast("Good"); } else fixLink(); return; }
+  switch (e.key) {
+    case "j": case "ArrowDown": S.sel = Math.min(n - 1, S.sel + 1); S.asked = null; render(); break;
+    case "k": case "ArrowUp": S.sel = Math.max(0, S.sel - 1); S.asked = null; render(); break;
+    case "o": case "Enter": openSel(); break;
+    case "e": act("done"); break;
+    case "s": if (S.view !== "done") snoozeMenu(); break;
+    case "/": e.preventDefault(); filter.style.display = "block"; filter.focus(); break;
+    case "!": teach("needs-you"); break;
+    case "-": teach("noise"); break;
+    case "l": e.preventDefault(); fixLink(); break;
+    case "m": mute(); break;
+    case "?": drawer(true); break;
+    case "r": $("#refreshBtn").click(); break;
+    case "i": S.view = "new"; S.sel = 0; load(); break;
+    case "u": if (S.undo) { const u = S.undo; S.undo = null; api(u.view === "new" ? "/api/reopen" : "/api/done", {ids: u.ids}).then(() => { toast("Undone"); load(); }); } break;
+    default:
+      if (/^[0-9]$/.test(e.key) && S.view === "new") {
+        const srcs = Object.keys(S.stats.sources || {});
+        S.source = e.key === "0" ? "" : (srcs[+e.key - 1] || S.source); S.sel = 0; load();
+      }
+  }
+});
+
+load(); loadRules();
+setInterval(() => { if (!$("#pop").classList.contains("show") && document.visibilityState === "visible") load(); }, 15000);
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+[project]
+name = "pile"
+version = "0.1.0"
+description = "Every notification and unread, one feed, deep links back to the thing, and any agent can work it."
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+pile = "pile.cli:main"
+
+[tool.setuptools.package-data]
+pile = ["ui.html"]
