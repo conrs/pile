@@ -236,10 +236,12 @@ $("#pop").addEventListener("click", e => { if (e.target.id === "pop") closeModal
 function snoozeMenu(){
   modal(`<h3>Snooze until…</h3><p>Comes back to the inbox then.</p><div class="opts">
     <button data-u="1h"><span>An hour</span><kbd>h</kbd></button>
-    <button data-u="tonight"><span>Tonight, 6pm</span><kbd>n</kbd></button>
+    ${new Date().getHours() < 18
+      ? `<button data-u="tonight"><span>Tonight, 6pm</span><kbd>n</kbd></button>`
+      : `<button data-u="3h"><span>In 3 hours</span><kbd>n</kbd></button>`}
     <button data-u="tomorrow"><span>Tomorrow, 9am</span><kbd>t</kbd></button>
     <button data-u="7d"><span>Next week</span><kbd>w</kbd></button></div>`,
-    k => { const u = {h: "1h", n: "tonight", t: "tomorrow", w: "7d"}[k]; if (u) { closeModal(); act("snooze", u); return true; } });
+    k => { const u = {h: "1h", n: new Date().getHours() < 18 ? "tonight" : "3h", t: "tomorrow", w: "7d"}[k]; if (u) { closeModal(); act("snooze", u); return true; } });
   $("#popcard").onclick = e => { const b = e.target.closest("[data-u]"); if (b) { closeModal(); act("snooze", b.dataset.u); } };
 }
 function fixLink(){
