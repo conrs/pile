@@ -37,6 +37,10 @@ ADDRESS = re.compile(r"\b\d{1,5}\s+(?:[A-Z][a-z]+\.?\s){1,3}(?:St|Street|Ave|Ave
                      r"Way|Ct|Court|Pl|Place|Ter|Terrace|Pkwy|Parkway)\b\.?(?:,?\s*(?:Apt|Unit|Suite|#)\s*\w+)?")
 
 
+STOP = {"the", "your", "our", "team", "new", "hello", "hi", "dear", "mr", "mrs", "ms", "dr", "my", "this", "weekly",
+        "daily", "support", "info", "no", "not", "and", "for", "from"}
+
+
 def luhn(digits: str) -> bool:
     total, alt = 0, False
     for d in reversed(digits):
@@ -139,8 +143,9 @@ class Redactor:
             token = self.pseudonym(name)
             s = re.sub(r"(?<!\w)" + re.escape(name) + r"(?!\w)", token, s, flags=re.I)
             first = name.split()[0]
-            if len(first) >= 3 and first != name and not self.allowed(first):
-                s = re.sub(r"(?<!\w)" + re.escape(first) + r"(?!\w)", token, s, flags=re.I)
+            if (len(first) >= 3 and first != name and first[:1].isupper() and first.lower() not in STOP
+                    and not self.allowed(first)):
+                s = re.sub(r"(?<!\w)" + re.escape(first) + r"(?!\w)", token, s)  # case-sensitive: "Will", not "will"
         return s
 
     # ---- items ----
@@ -154,7 +159,8 @@ class Redactor:
         """Full names of everyone who has written to you, so a mention in someone else's message is caught too.
         Only names of two or more words: a one-word sender ("Calendar", "Mom") isn't reliable enough to hunt for."""
         if getattr(self, "_people", None) is None:
-            rows = self.store.db.execute("SELECT DISTINCT sender, app, app_name FROM items") if self.store else []
+            rows = self.store.db.execute("SELECT DISTINCT sender, app, app_name FROM items"
+                                         " WHERE COALESCE(tag, '') != 'sift'") if self.store else []
             self._people = [r[0] for r in rows if r[0] and len(r[0].split()) >= 2
                             and self.is_person({"sender": r[0], "app": r[1], "app_name": r[2]})]
         return self._people

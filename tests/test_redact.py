@@ -98,3 +98,14 @@ class CrossMentionTest(unittest.TestCase):
         out = r.item(item)
         self.assertNotIn("Priya", out["body"])
         self.assertIn("calendar invite", out["body"])
+
+
+class NoOverreachTest(unittest.TestCase):
+    def test_newsletter_names_and_common_words_survive(self):
+        s = store.Store(":memory:")
+        demo.seed(s)
+        r = redact.Redactor(s)
+        out = r.item({"sender": "Priya Raman", "app": "com.tinyspeck.slackmacgap", "app_name": "Slack", "title": "#launch",
+                      "body": "Can you sanity-check the pricing page? Will is out, will you?", "thread": "x"})
+        self.assertIn("the pricing page", out["body"])
+        self.assertIn("will you", out["body"])
