@@ -31,13 +31,21 @@ def doctor(s, kw):
     for mod, ok, msg in collectors.status(kw):
         mark = {True: "ok ", False: "-- ", None: "   "}[ok]
         print("  %s %-9s %s" % (mark, mod.NAME, msg))
+        if ok and hasattr(mod, "doctor_lines"):
+            for good, line in mod.doctor_lines():
+                print("      %s  %s" % ("ok" if good else "!!", line))
     print("\n  triage    " + ("model: %s" % triage.config()[1] if triage.config()
                                else "off (set PILE_BASE_URL and PILE_MODEL to label with a model)"))
+    from . import envfile
+    print("  settings from: %s" % (", ".join(("~" + f[len(home):]) if f.startswith(home) else f for f in envfile.LOADED)
+                                   or "environment only (none of ~/.config/pile/env, ./.env)"))
     ud = collectors.user_dir()
     print("  your collectors: %s" % (("~" + ud[len(home):]) if ud.startswith(home) else ud))
 
 
 def main(argv=None):
+    from . import envfile
+    envfile.load()
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--db", default=argparse.SUPPRESS, help="SQLite file (default ~/.local/share/pile/inbox.db)")
     common.add_argument("--demo", action="store_true", default=argparse.SUPPRESS,

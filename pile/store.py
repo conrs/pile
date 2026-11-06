@@ -166,7 +166,8 @@ class Store:
         """Mark done the open items a source no longer reports (read elsewhere)."""
         live = set(live_ext_ids)
         gone = [r["id"] for r in self.db.execute(
-            "SELECT id, ext_id FROM items WHERE source=? AND state!='done' AND tag IS NULL", (source,))
+            "SELECT id, ext_id FROM items WHERE source=? AND state!='done'"
+            " AND (tag IS NULL OR tag NOT IN ('unanswered', 'earlier'))", (source,))
             if r["ext_id"] not in live]
         return self.set_state(gone, "done")
 
@@ -290,6 +291,7 @@ class Store:
             out["sources"][r["source"]] = r["n"]
         for r in self.db.execute("SELECT COALESCE(label,'') l, COUNT(*) n FROM items WHERE state='new' GROUP BY l"):
             out["labels"][r["l"] or "unlabelled"] = r["n"]
+        out["sift"] = self.db.execute("SELECT COUNT(*) n FROM items WHERE state='new' AND tag='sift'").fetchone()["n"]
         out["unanswered"] = self.db.execute(
             "SELECT COUNT(*) n FROM items WHERE state='new' AND tag='unanswered'").fetchone()["n"]
         nxt = self.db.execute("SELECT MIN(snooze_until) t FROM items WHERE state='snoozed'").fetchone()

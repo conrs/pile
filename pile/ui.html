@@ -61,6 +61,7 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
 .chip{font-size:11px;font-weight:600;border-radius:6px;padding:1px 7px;white-space:nowrap}
 .chip.needs-you{background:var(--accent);color:var(--accent-ink)}
 .chip.fyi{background:rgba(143,166,200,.15);color:var(--fyi)}
+.chip.tag.task{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .chip.tag{background:rgba(255,181,71,.12);color:var(--accent);border:1px solid rgba(255,181,71,.35)}
 .l2.older{font-size:13px;margin-top:3px;padding-left:10px;border-left:2px solid var(--line)}
 .chip.noise{background:rgba(85,91,102,.18);color:var(--noise)}
@@ -139,7 +140,7 @@ body.private .privbadge{display:inline-block}
 const $ = s => document.querySelector(s);
 const S = {picked: new Set(), anchor: null, items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
 const SOURCES = {macos: "Notifications", github: "GitHub", imap: "Mail", demo: "Demo"};
-const VIEWS = [["new", "Inbox"], ["unanswered", "Unanswered"], ["snoozed", "Snoozed"], ["done", "Done"]];
+const VIEWS = [["new", "Inbox"], ["unanswered", "Unanswered"], ["sift", "Sift"], ["snoozed", "Snoozed"], ["done", "Done"]];
 
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 const APPCOLOR = {Slack: "#d9a6f2", Messages: "#7ee08a", GitHub: "#cfd6de", Discord: "#8f9cff", Linear: "#f29ac0",
@@ -167,6 +168,9 @@ function groups(){
   const map = new Map();
   let items = S.items;
   if (S.view === "unanswered") items = items.filter(x => x.tag === "unanswered").sort((a, b) => a.at - b.at);  // oldest first
+  // Sift: newsletters, receipts and other robots wait here until the real inbox is done.
+  else if (S.view === "sift") items = items.filter(x => x.tag === "sift").sort((a, b) => a.at - b.at);
+  else if (S.view === "new") items = items.filter(x => x.tag !== "sift");
   for (const it of items) {
     if (f && ![it.sender, it.title, it.body, it.app_name].join(" ").toLowerCase().includes(f)) continue;
     const g = map.get(it.thread);
@@ -176,7 +180,7 @@ function groups(){
 }
 
 async function load(){
-  const q = new URLSearchParams({state: S.view === "unanswered" ? "new" : S.view});
+  const q = new URLSearchParams({state: ["unanswered", "sift"].includes(S.view) ? "new" : S.view});
   if (S.source) q.set("source", S.source);
   const j = await api("/api/items?" + q);
   S.items = j.items; S.stats = j.stats;
@@ -186,13 +190,14 @@ async function loadRules(){ S.rules = (await api("/api/rules")).rules; $("#nrule
 
 function render(){
   const st = S.stats;
-  $("#count").innerHTML = st.new ? `<b>${st.new}</b> new` + (st.labels && st.labels["needs-you"] ? ` · <b style="color:var(--accent)">${st.labels["needs-you"]}</b> need you` : "") : "all clear";
-  $("#views").innerHTML = VIEWS.filter(([k]) => k !== "unanswered" || st.unanswered).map(([k, n]) => `<button class="pill ${S.view === k ? "on" : ""}" data-view="${k}">${n}<span class="n">${st[k] || 0}</span></button>`).join("");
+  const inboxN = st.new - (st.sift || 0);
+  $("#count").innerHTML = inboxN ? `<b>${inboxN}</b> new` + (st.labels && st.labels["needs-you"] ? ` · <b style="color:var(--accent)">${st.labels["needs-you"]}</b> need you` : "") : "all clear";
+  $("#views").innerHTML = VIEWS.filter(([k]) => !["unanswered", "sift"].includes(k) || st[k]).map(([k, n]) => `<button class="pill ${S.view === k ? "on" : ""}" data-view="${k}">${n}<span class="n">${k === "new" ? st.new - (st.sift || 0) : (st[k] || 0)}</span></button>`).join("");
   const srcs = Object.entries(st.sources || {});
   const total = srcs.reduce((a, [, n]) => a + n, 0);
-  $("#sources").innerHTML = !["new", "unanswered"].includes(S.view) ? "" :
+  $("#sources").innerHTML = !["new", "unanswered", "sift"].includes(S.view) ? "" :
     `<button class="pill ${!S.source ? "on" : ""}" data-src="">All<span class="n">${total}</span></button>` +
-    srcs.map(([k, n], i) => `<button class="pill ${S.source === k ? "on" : ""}" data-src="${esc(k)}" title="${i + 1}">${esc(SOURCES[k] || k)}<span class="n">${n}</span></button>`).join("");
+    srcs.map(([k, n], i) => `<button class="pill ${S.source === k ? "on" : ""}" data-src="${esc(k)}" title="${i + 1}">${esc(SOURCES[k] || (k.startsWith("imap:") ? "Mail · " + k.slice(5) : k))}<span class="n">${n}</span></button>`).join("");
   const gs = groups();
   S.sel = Math.max(0, Math.min(S.sel, gs.length - 1));
   const live = new Set(gs.map(g => g.lead.thread));
@@ -202,7 +207,8 @@ function render(){
     const wake = st.next_wake ? new Date(st.next_wake * 1000).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}) : "";
     $("#list").innerHTML = S.view === "new" && !S.filter ? `<div class="zero">
       <svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="30" stroke="#ffb547" stroke-width="3" opacity=".35"/><path d="M20 33l8 8 16-17" stroke="#ffb547" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <div class="big">Inbox zero.</div><div>Nothing needs you right now.${st.snoozed ? ` ${st.snoozed} snoozed${wake ? ", next back " + esc(wake) : ""}.` : ""}</div></div>`
+      <div class="big">Inbox zero.</div><div>Nothing needs you right now.${st.snoozed ? ` ${st.snoozed} snoozed${wake ? ", next back " + esc(wake) : ""}.` : ""}</div>
+      ${st.sift ? `<button class="pill on" data-view="sift" style="margin-top:18px">Sift ${st.sift} unread${st.sift > 1 ? "s" : ""}: newsletters, receipts, updates</button>` : ""}</div>`
       : `<div class="zero">Nothing here.</div>`;
     return;
   }
@@ -213,7 +219,7 @@ function render(){
       <div class="av" style="background:${color(it.app_name)}">${esc(it.app_name[0] || "?")}</div>
       <div class="main"><div class="l1"><span class="who">${esc(name)}</span><span class="app">${esc(it.app_name)}</span>
         ${it.label ? `<span class="chip ${esc(it.label)}">${esc(it.label)}</span>` : ""}
-        ${it.tag ? `<span class="chip tag">${esc(it.tag)}</span>` : ""}
+        ${it.tag && it.tag !== "sift" ? `<span class="chip tag ${esc(it.tag)}">${esc(it.tag)}</span>` : ""}
         ${it.link_learned ? `<span class="learned" title="${esc(it.link)}">● learned link</span>` : ""}</div>
         <div class="l2">${it.title ? `<span class="t">${esc(it.title)}</span> — ` : ""}${esc(it.body)}</div>
         ${i === S.sel && g.items.length > 1 ? g.items.slice(1, 5).map(x => `<div class="l2 older"><span class="t">${esc(x.sender || x.app_name)}</span> ${esc(x.body)} <span class="when">${ago(x.at)}</span></div>`).join("") + (g.items.length > 5 ? `<div class="l2 older">+${g.items.length - 5} more</div>` : "") : ""}</div>
@@ -244,7 +250,7 @@ async function act(kind, until){
   const gs = targets(); if (!gs.length) return;
   const ids = gs.flatMap(g => g.items.map(x => x.id));
   clearPicks();
-  const inbox = S.view === "new" || S.view === "unanswered";
+  const inbox = ["new", "unanswered", "sift"].includes(S.view);
   if (kind === "done") { await api(inbox ? "/api/done" : "/api/reopen", {ids}); toast(inbox ? "Done" + (ids.length > 1 ? ` (${ids.length})` : "") : "Back in the inbox"); }
   if (kind === "snooze") { const r = await api("/api/snooze", {ids, until}); toast("Snoozed until " + new Date(r.until).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})); }
   await load();

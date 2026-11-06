@@ -67,7 +67,8 @@ Items from the same conversation group into one row (pile uses the thread id app
 | `windows` | Windows | `%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db` | nothing (it's your own file); install Python from python.org |
 | `linux` | Linux | desktop notifications, live, via `dbus-monitor` | a desktop session; runs while `watch` or `serve` runs |
 | `github` | any | GitHub notifications | `GITHUB_TOKEN`, or the `gh` CLI logged in |
-| `imap` | any | unread mail (Gmail with an app password, or any IMAP server) | `PILE_IMAP_USER`, `PILE_IMAP_PASSWORD`, optional `PILE_IMAP_HOST` |
+| `imap` | any | unread mail from one or more accounts (Gmail with an app password, or any IMAP server) | `PILE_IMAP_USER`, `PILE_IMAP_PASSWORD` (see [Mail](#mail)) |
+| `mailapp` | macOS | Apple Mail's local index: every account Mail.app has, no passwords | Full Disk Access; Mail.app set up |
 | `webhook` | any | anything you POST to `/ingest` | `pile token` |
 
 `python3 -m pile doctor` tells you which of these work on your machine and what to do about the rest.
@@ -82,6 +83,28 @@ curl -X POST http://<your-computer>:8765/ingest \
 ```
 
 A native Android companion app is future work.
+
+## Mail
+
+Put settings in `~/.config/pile/env` (then `chmod 600 ~/.config/pile/env`). pile reads it, then a `.env` in the folder you run it from; real environment variables always win, and `pile doctor` says which file it used without printing values. Prefer the config file over a `.env` inside a repo.
+
+```sh
+# Gmail: turn on 2-Step Verification, then make an app password at myaccount.google.com/apppasswords
+PILE_IMAP_USER=you@gmail.com
+PILE_IMAP_PASSWORD="abcd efgh ijkl mnop"
+PILE_IMAP_NAME=personal
+# more accounts: the same with a number
+PILE_IMAP_2_USER=you@work.example.com
+PILE_IMAP_2_PASSWORD=...
+PILE_IMAP_2_HOST=imap.work.example.com
+PILE_IMAP_2_NAME=work
+```
+
+Each account gets its own source filter and label, and Gmail links open the exact thread in the right signed-in account. Outlook.com and Microsoft 365 need OAuth rather than app passwords, so they don't work over IMAP yet; Gmail API, JMAP and Microsoft Graph collectors are future work. On a Mac, the `mailapp` collector reads Apple Mail's own index instead, with no passwords at all.
+
+**Tasks.** Without any model, pile marks an email as a `task` when a real person (not a list, a receipt or a no-reply robot) wrote to you directly (you're in To, not just Cc), you haven't replied, and it asks for something: a question, "can you", "please", "by Friday", "review", "sign", a deadline. Your `+` and `-` rules and optional model triage still apply.
+
+**Sift.** Unread newsletters, receipts and updates stay out of the inbox. Once you reach inbox zero, a Sift button shows them oldest first, grouped by sender, so `e` clears a sender's pile and `-` teaches pile they don't matter.
 
 ## How it fits together
 
