@@ -58,6 +58,7 @@ def default_path() -> str:
 class Store:
     def __init__(self, path: Optional[str] = None):
         self.path = path or default_path()
+        self.on_change = None  # writeback.attach: tell the sources about a recorded change
         if self.path != ":memory:":
             os.makedirs(os.path.dirname(os.path.abspath(self.path)), exist_ok=True)
         self.db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
@@ -203,6 +204,11 @@ class Store:
         self.log(action, item_ids, change, **detail)
         if change:  # a new change ends the redo chain
             self.db.execute("UPDATE actions SET undone=0 WHERE undone>0")
+            self._changed(change)
+
+    def _changed(self, change: dict) -> None:
+        if self.on_change:
+            self.on_change(change)
 
     def _apply(self, change: dict, forward: bool) -> None:
         items = change["items_after" if forward else "items_before"]
@@ -240,7 +246,9 @@ class Store:
                                   " ORDER BY id DESC LIMIT 1").fetchone()
             if not row:
                 break
-            self._apply(json.loads(row["change"]), forward=False)
+            change = json.loads(row["change"])
+            self._apply(change, forward=False)
+            self._changed({"items_before": change["items_after"], "items_after": change["items_before"]})
             self.db.execute("UPDATE actions SET undone=? WHERE id=?", (time.time(), row["id"]))
             self.log("undo", [row["item_id"]] if row["item_id"] else (), of=row["id"])
             done.append(self._describe(row))
@@ -256,7 +264,9 @@ class Store:
             row = self.db.execute("SELECT * FROM actions WHERE undone > 0 ORDER BY undone DESC, id DESC LIMIT 1").fetchone()
             if not row:
                 break
-            self._apply(json.loads(row["change"]), forward=True)
+            change = json.loads(row["change"])
+            self._apply(change, forward=True)
+            self._changed(change)
             self.db.execute("UPDATE actions SET undone=NULL WHERE id=?", (row["id"],))
             self.log("redo", [row["item_id"]] if row["item_id"] else (), of=row["id"])
             done.append(self._describe(row))

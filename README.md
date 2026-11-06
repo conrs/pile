@@ -191,9 +191,13 @@ python3 -m pile triage
 
 It labels new items `needs-you`, `fyi` or `noise`; labels show as chips. Your own rules run first.
 
+## Writeback: done means done everywhere
+
+Set `PILE_WRITEBACK=1` and marking something done in pile clears it at the source too: mail is marked read over IMAP, and GitHub notification threads are marked done. It happens in the background, so pile stays instant. Undo puts mail back to unread; GitHub can't make a thread unread again, so an undone GitHub item just stays in pile. Snooze stays inside pile. Notification Center banners can't be cleared by another app on macOS, so those only leave pile.
+
 ## Privacy
 
-Everything stays on your machine: one SQLite file at `~/.local/share/pile/inbox.db` (or `--db PATH`). The web UI binds to 127.0.0.1 and refuses other host names and cross-site requests. Nothing leaves your computer unless you turn on model triage, which sends item text to the endpoint you chose. The collectors only read; pile never marks anything read in the source apps.
+Everything stays on your machine: one SQLite file at `~/.local/share/pile/inbox.db` (or `--db PATH`). The web UI binds to 127.0.0.1 and refuses other host names and cross-site requests. Nothing leaves your computer unless you turn on model triage, which sends item text to the endpoint you chose. The collectors only read, and pile never changes anything in the source apps unless you turn on writeback (below).
 
 ## Write a collector
 

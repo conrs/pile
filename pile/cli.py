@@ -15,6 +15,9 @@ def open_store(args):
     if args.demo and not path:
         path = os.path.join(os.path.dirname(store.default_path()), "demo.db")
     s = store.Store(path)
+    if not args.demo:
+        from . import writeback
+        writeback.attach(s)
     if args.demo and args.cmd == "serve":  # every demo starts fresh, with times relative to now
         s.db.execute("DELETE FROM items")
         s.db.execute("DELETE FROM rules")
@@ -34,7 +37,10 @@ def doctor(s, kw):
         if ok and hasattr(mod, "doctor_lines"):
             for good, line in mod.doctor_lines():
                 print("      %s  %s" % ("ok" if good else "!!", line))
-    print("\n  triage    " + ("model: %s" % triage.config()[1] if triage.config()
+    from . import writeback
+    print("\n  writeback " + ("on: done marks mail read and GitHub threads done" if writeback.enabled()
+                               else "off (PILE_WRITEBACK=1: done also marks mail read and GitHub threads done)"))
+    print("  triage    " + ("model: %s" % triage.config()[1] if triage.config()
                                else "off (set PILE_BASE_URL and PILE_MODEL to label with a model)"))
     from . import redact
     cfg = triage.config()
