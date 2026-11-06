@@ -47,6 +47,9 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
 @media (hover:hover){.row.sel:not(:hover) .acts{display:none}}
 .row.picked{background:rgba(255,181,71,.08)}
 .row.picked .av{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
+/* Screen-share mode blurs the avatar (and its ring) and the text, so the cursor and the selection carry their own marks. */
+body.private .row.sel{outline:2px solid var(--accent);outline-offset:-2px;border-left-width:6px;background:#22252c}
+body.private .row.picked{background:rgba(255,181,71,.16);box-shadow:inset 6px 0 0 var(--accent)}
 #picked b{color:var(--accent)}
 .av{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-weight:700;font-size:14px;color:#0d0e11}
 .main{min-width:0}
