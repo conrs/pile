@@ -66,6 +66,7 @@ body.private .row.picked{background:rgba(255,181,71,.16);box-shadow:inset 6px 0 
 .chip.fyi{background:rgba(143,166,200,.15);color:var(--fyi)}
 .chip.tag.task{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .chip.tag{background:rgba(255,181,71,.12);color:var(--accent);border:1px solid rgba(255,181,71,.35)}
+.row:not(.sel) .l2.older{display:none}
 .l2.older{font-size:13px;margin-top:3px;padding-left:10px;border-left:2px solid var(--line)}
 .chip.noise{background:rgba(85,91,102,.18);color:var(--noise)}
 .learned{font-size:11px;color:var(--ok)}
@@ -143,7 +144,13 @@ body.private .privbadge{display:inline-block}
 "use strict";
 const $ = s => document.querySelector(s);
 const S = {toggled: new Set(), anchor: null, items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
-const SOURCES = {macos: "Notifications", github: "GitHub", imap: "Mail", demo: "Demo"};
+const SOURCES = {macos: "Notifications", windows: "Notifications", linux: "Notifications", github: "GitHub", imap: "Mail",
+  mailapp: "Apple Mail", messages: "Messages", webhook: "Webhook", demo: "Demo"};
+function srcLabel(k){
+  if (SOURCES[k]) return SOURCES[k];
+  const it = S.items.find(x => x.source === k);  // e.g. "Gmail · work" for an IMAP account
+  return it ? it.app_name : k.replace(/^imap:/, "Mail · ");
+}
 const VIEWS = [["new", "Inbox"], ["unanswered", "Unanswered"], ["sift", "Sift"], ["snoozed", "Snoozed"], ["done", "Done"]];
 
 function esc(s){ return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
@@ -183,12 +190,34 @@ function groups(){
   return [...map.values()];
 }
 
+// Refreshes keep the cursor on the same thread and never undo what the screen already shows.
+let loadSeq = 0;
 async function load(){
+  const seq = ++loadSeq;
   const q = new URLSearchParams({state: ["unanswered", "sift"].includes(S.view) ? "new" : S.view});
   if (S.source) q.set("source", S.source);
   const j = await api("/api/items?" + q);
+  if (seq !== loadSeq || S.pending) return;  // a newer load, or an action still on its way to the server
+  const before = current(), key = before && before.lead.thread;
   S.items = j.items; S.stats = j.stats;
+  if (key) { const i = groups().findIndex(g => g.lead.thread === key); if (i >= 0) S.sel = i; }
   render();
+}
+// Optimistic changes: show the result now, tell the server in the background, put it back if that fails.
+S.pending = 0;
+function optimistic(change, call, ok){
+  const snap = {items: S.items, stats: S.stats, sel: S.sel};
+  change();
+  render();
+  S.pending++;
+  call().then(r => { S.pending--; if (ok) ok(r); if (!S.pending) { load(); loadRules(); } })
+    .catch(err => { S.pending--; S.items = snap.items; S.stats = snap.stats; S.sel = snap.sel; render(); toast("Didn't save: " + err.message); });
+}
+function dropItems(ids){
+  const gone = new Set(ids);
+  const n = S.items.filter(x => gone.has(x.id)).length;
+  S.items = S.items.filter(x => !gone.has(x.id));
+  S.stats = Object.assign({}, S.stats, {new: Math.max(0, (S.stats.new || 0) - (["new", "unanswered", "sift"].includes(S.view) ? n : 0))});
 }
 async function loadRules(){ S.rules = (await api("/api/rules")).rules; $("#nrules").textContent = S.rules.length; }
 
@@ -201,7 +230,7 @@ function render(){
   const total = srcs.reduce((a, [, n]) => a + n, 0);
   $("#sources").innerHTML = !["new", "unanswered", "sift"].includes(S.view) ? "" :
     `<button class="pill ${!S.source ? "on" : ""}" data-src="">All<span class="n">${total}</span></button>` +
-    srcs.map(([k, n], i) => `<button class="pill ${S.source === k ? "on" : ""}" data-src="${esc(k)}" title="${i + 1}">${esc(SOURCES[k] || (k.startsWith("imap:") ? "Mail · " + k.slice(5) : k))}<span class="n">${n}</span></button>`).join("");
+    srcs.map(([k, n], i) => `<button class="pill ${S.source === k ? "on" : ""}" data-src="${esc(k)}" title="${i + 1}">${esc(srcLabel(k))}<span class="n">${n}</span></button>`).join("");
   const gs = groups();
   S.sel = Math.max(0, Math.min(S.sel, gs.length - 1));
   const live = new Set(gs.map(g => g.lead.thread));
@@ -228,7 +257,7 @@ function render(){
         ${it.tag && it.tag !== "sift" ? `<span class="chip tag ${esc(it.tag)}">${esc(it.tag)}</span>` : ""}
         ${it.link_learned ? `<span class="learned" title="${esc(it.link)}">● learned link</span>` : ""}</div>
         <div class="l2">${it.title ? `<span class="t">${esc(it.title)}</span> — ` : ""}${esc(it.body)}</div>
-        ${i === S.sel && g.items.length > 1 ? g.items.slice(1, 5).map(x => `<div class="l2 older"><span class="t">${esc(x.sender || x.app_name)}</span> ${esc(x.body)} <span class="when">${ago(x.at)}</span></div>`).join("") + (g.items.length > 5 ? `<div class="l2 older">+${g.items.length - 5} more</div>` : "") : ""}</div>
+        ${g.items.length > 1 ? g.items.slice(1, 5).map(x => `<div class="l2 older"><span class="t">${esc(x.sender || x.app_name)}</span> ${esc(x.body)} <span class="when">${ago(x.at)}</span></div>`).join("") + (g.items.length > 5 ? `<div class="l2 older">+${g.items.length - 5} more</div>` : "") : ""}</div>
       <div class="acts">
         <button data-a="open" title="Open (o)">Open</button><button data-a="done" title="${S.view === "done" ? "Back to inbox (e)" : "Done (e)"}">${S.view === "done" ? "Undone" : "Done"}</button>
         <button data-a="snooze" title="Snooze (s)">Snooze</button><button data-a="imp" title="Always important (+)">+</button>
@@ -240,6 +269,32 @@ function render(){
   }).join("") + `</div>`;
   const sel = document.querySelector(".row.sel");
   if (sel) sel.scrollIntoView({block: "nearest"});
+}
+
+// Moving the cursor or the selection only flips classes on rows already on screen: no rebuild, so key repeat stays smooth.
+let paintQueued = false;
+function paint(){
+  if (paintQueued) return;
+  paintQueued = true;
+  requestAnimationFrame(() => {
+    paintQueued = false;
+    const rows = document.querySelectorAll("#list .row");
+    const gs = groups();
+    if (rows.length !== gs.length) { render(); return; }
+    S.sel = Math.max(0, Math.min(S.sel, gs.length - 1));
+    const P = pickedSet(gs);
+    rows.forEach((el, i) => {
+      el.classList.toggle("sel", i === S.sel);
+      const on = P.has(gs[i].lead.thread);
+      if (el.classList.contains("picked") !== on) {
+        el.classList.toggle("picked", on);
+        const b = el.querySelector('[data-a="pick"]'); if (b) b.textContent = on ? "Unselect" : "Select";
+      }
+      const ask = el.querySelector(".ask"); if (ask && S.asked !== gs[i].lead.id) ask.remove();
+    });
+    $("#picked").innerHTML = P.size ? `<b>${P.size}</b> selected · <kbd>Esc</kbd> to clear` : "";
+    const sel = rows[S.sel]; if (sel) sel.scrollIntoView({block: "nearest"});
+  });
 }
 
 function current(){ return groups()[S.sel]; }
@@ -273,9 +328,12 @@ async function act(kind, until){
   if (at.length) S.sel = Math.min(...at);
   clearPicks();
   const inbox = ["new", "unanswered", "sift"].includes(S.view);
-  if (kind === "done") { await api(inbox ? "/api/done" : "/api/reopen", {ids}); toast(inbox ? "Done" + (ids.length > 1 ? ` (${ids.length})` : "") : "Back in the inbox"); }
-  if (kind === "snooze") { const r = await api("/api/snooze", {ids, until}); toast("Snoozed until " + new Date(r.until).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})); }
-  await load();
+  if (kind === "done") {
+    optimistic(() => dropItems(ids), () => api(inbox ? "/api/done" : "/api/reopen", {ids}));
+    toast(inbox ? "Done" + (ids.length > 1 ? ` (${ids.length})` : "") : "Back in the inbox");
+  }
+  if (kind === "snooze") optimistic(() => dropItems(ids), () => api("/api/snooze", {ids, until}),
+    r => toast("Snoozed until " + new Date(r.until).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"})));
 }
 // Web links open right here, inside the keypress or click (a window.open after an await is a blocked popup).
 // Everything else (sms:, slack://, an app) goes to the server, which runs macOS `open`.
@@ -324,11 +382,12 @@ function fixLink(){
 }
 async function teach(label){
   const gs = targets(); if (!gs.length) return;
-  const r = await api("/api/label", {ids: gs.map(g => g.lead.id), label});
   clearPicks();
-  const who = gs.length > 1 ? gs.length + " senders" : (isPrivate() ? "this sender" : (r.rules[0].note || "this sender"));
+  const threads = new Set(gs.map(g => g.lead.thread));
+  optimistic(() => { S.items = S.items.map(x => threads.has(x.thread) ? Object.assign({}, x, {label}) : x); },
+             () => api("/api/label", {ids: gs.map(g => g.lead.id), label}));
+  const who = gs.length > 1 ? gs.length + " senders" : (isPrivate() ? "this sender" : (gs[0].lead.sender || gs[0].lead.title || "this sender"));
   toast((label === "noise" ? "Not important: " : "Always important: ") + who);
-  await loadRules(); await load();
 }
 function mute(){
   const gs = targets(); if (!gs.length) return;
@@ -337,7 +396,12 @@ function mute(){
     <div class="opts"><button data-m="1"><span>Mute ${esc(names)}</span><kbd>y</kbd></button><button data-m="0"><span>Cancel</span><kbd>esc</kbd></button></div>`,
     k => { if (k === "y") { doMute(); return true; } });
   $("#popcard").onclick = e => { const b = e.target.closest("[data-m]"); if (b) b.dataset.m === "1" ? doMute() : closeModal(); };
-  async function doMute(){ closeModal(); await api("/api/mute", {ids: gs.map(g => g.lead.id)}); clearPicks(); toast("Muted " + names); await loadRules(); await load(); }
+  function doMute(){
+    closeModal(); clearPicks();
+    const apps = new Set(gs.map(g => g.lead.app));
+    optimistic(() => dropItems(S.items.filter(x => apps.has(x.app)).map(x => x.id)), () => api("/api/mute", {ids: gs.map(g => g.lead.id)}));
+    toast("Muted " + names);
+  }
 }
 
 // c: combine the selected rows into one conversation (the newest row's). With nothing selected, start a selection.
@@ -348,10 +412,14 @@ async function combine(){
     toast("Shift+j / Shift+k to add rows, then c to combine");
     return;
   }
-  const r = await api("/api/combine", {ids: gs.map(g => g.lead.id)});
   clearPicks();
+  const newest = gs.reduce((a, b) => (b.lead.at > a.lead.at ? b : a)).lead.thread;
+  const merge = new Set(gs.map(g => g.lead.thread));
+  optimistic(() => {
+    S.items = S.items.map(x => merge.has(x.thread) ? Object.assign({}, x, {thread: newest}) : x);
+    const i = groups().findIndex(g => g.lead.thread === newest); if (i >= 0) S.sel = i;
+  }, () => api("/api/combine", {ids: gs.map(g => g.lead.id)}));
   toast("Combined " + gs.length + " rows. Learned for next time.");
-  await loadRules(); await load();
 }
 async function ungroup(){
   const g = current(); if (!g) return;
@@ -447,16 +515,16 @@ document.addEventListener("keydown", e => {
   if (e.shiftKey && ["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
     e.preventDefault();
     const step = {ArrowDown: 1, ArrowUp: -1, Home: -n, End: n}[e.key];
-    extend(step, n); S.asked = null; render(); return;
+    extend(step, n); S.asked = null; paint(); return;
   }
   switch (e.key) {
-    case "Home": case "End": e.preventDefault(); commitRange(); S.sel = e.key === "Home" ? 0 : n - 1; render(); break;
-    case "j": case "ArrowDown": commitRange(); S.sel = Math.min(n - 1, S.sel + 1); S.asked = null; render(); break;
-    case "k": case "ArrowUp": commitRange(); S.sel = Math.max(0, S.sel - 1); S.asked = null; render(); break;
-    case "J": extend(1, n); S.asked = null; render(); break;
-    case "K": extend(-1, n); S.asked = null; render(); break;
-    case "x": pick(S.sel); render(); break;
-    case "Escape": if (pickedSet().size) { clearPicks(); render(); } break;
+    case "Home": case "End": e.preventDefault(); commitRange(); S.sel = e.key === "Home" ? 0 : n - 1; paint(); break;
+    case "j": case "ArrowDown": e.preventDefault(); commitRange(); S.sel = Math.min(n - 1, S.sel + 1); S.asked = null; paint(); break;
+    case "k": case "ArrowUp": e.preventDefault(); commitRange(); S.sel = Math.max(0, S.sel - 1); S.asked = null; paint(); break;
+    case "J": extend(1, n); S.asked = null; paint(); break;
+    case "K": extend(-1, n); S.asked = null; paint(); break;
+    case "x": pick(S.sel); paint(); break;
+    case "Escape": if (pickedSet().size) { clearPicks(); paint(); } break;
     case "o": openSel(); break;
     case "Enter": if (e.target.tagName !== "BUTTON") openSel(); break;
     case "e": act("done"); break;
@@ -496,7 +564,11 @@ function setPrivate(on){
   if (q.get("keep") === "github") document.body.classList.add("keep-github");
 })();
 load(); loadRules();
-setInterval(() => { if (!$("#pop").classList.contains("show") && document.visibilityState === "visible") load(); }, 15000);
+let lastKey = 0;
+document.addEventListener("keydown", () => { lastKey = Date.now(); }, true);
+setInterval(() => {
+  if (!$("#pop").classList.contains("show") && document.visibilityState === "visible" && !S.pending && Date.now() - lastKey > 2000) load();
+}, 15000);
 </script>
 </body>
 </html>
