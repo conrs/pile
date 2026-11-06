@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pile terminal scene</title>
+<!-- Plays a scripted terminal for the setup video. Open with #setup or #agent. -->
+<style>
+:root{--bg:#0d0e11;--win:#15171c;--line:#262a33;--text:#e8e9ec;--dim:#9096a1;--faint:#5d636e;--accent:#ffb547;--ok:#6fd49a;--blue:#8fb8ff}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);overflow:hidden}
+body{display:flex;align-items:center;justify-content:center}
+.win{width:94vw;height:calc(100vh - 120px);background:var(--win);border:1px solid var(--line);border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.5);
+  display:flex;flex-direction:column;overflow:hidden;margin-top:-70px}
+.bar{height:34px;display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid var(--line);color:var(--faint);font:12px -apple-system,"Adwaita Sans",sans-serif}
+.dot{width:12px;height:12px;border-radius:50%;background:#2c3039}
+.bar span{margin-left:auto;margin-right:auto}
+pre{margin:0;padding:14px 18px;font:15px/1.45 "Adwaita Mono",Menlo,"DejaVu Sans Mono",monospace;white-space:pre-wrap;flex:1;overflow:hidden}
+.p{color:var(--accent)} .c{color:var(--text)} .o{color:var(--dim)} .ok{color:var(--ok)} .tool{color:var(--blue)} .you{color:var(--accent)}
+.cur{display:inline-block;width:9px;height:19px;background:var(--text);vertical-align:-3px;animation:b 1s steps(1) infinite}
+@keyframes b{50%{opacity:0}}
+</style>
+</head>
+<body>
+<div class="win"><div class="bar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span id="title">Terminal</span></div><pre id="out"></pre></div>
+<script>
+"use strict";
+// Each step: ["cmd", text] typed after a prompt; ["out", text, cls] printed; ["wait", ms]; ["clear"].
+const SCENES = {
+  setup: {title: "Terminal", prompt: "$ ", steps: [
+    ["wait", 500],
+    ["cmd", "git clone https://github.com/conrs/pile && cd pile"],
+    ["out", "Cloning into 'pile'...\ndone."],
+    ["wait", 500],
+    ["cmd", "python3 -m pile doctor"],
+    ["out", "pile 0.1.0 on linux (Python 3.14.8)\ndatabase: ~/.local/share/pile/inbox.db\n"],
+    ["out", "      macos     not for linux (runs on darwin)\n      windows   not for linux (runs on windows)"],
+    ["out", "  ok  linux     listening while `pile watch` or `pile serve` runs", "ok"],
+    ["out", "  --  github    no token: set GITHUB_TOKEN (notifications scope) or run `gh auth login`\n  --  imap      set PILE_IMAP_USER and PILE_IMAP_PASSWORD (Gmail: myaccount.google.com/apppasswords)"],
+    ["out", "  ok  webhook   POST /ingest while `pile serve` runs (token: `pile token`)", "ok"],
+    ["out", "\n  triage    off (set PILE_BASE_URL and PILE_MODEL to label with a model)"],
+    ["wait", 2200],
+    ["cmd", "python3 -m pile collect --demo"],
+    ["out", "{\"demo\": 18}"],
+    ["wait", 700],
+    ["cmd", "python3 -m pile serve --demo"],
+    ["out", "pile: http://127.0.0.1:8765  (Ctrl-C to stop)", "ok"],
+    ["wait", 1800],
+  ]},
+  agent: {title: "Terminal", prompt: "$ ", steps: [
+    ["wait", 400],
+    ["cmd", "claude mcp add pile -- python3 -m pile mcp --demo"],
+    ["out", "Added stdio MCP server pile with command: python3 -m pile mcp --demo"],
+    ["wait", 600],
+    ["cmd", "claude"],
+    ["wait", 400],
+    ["you", "> which three of these matter?"],
+    ["wait", 500],
+    ["out", "● pile · list_inbox (label: needs-you)", "tool"],
+    ["out", "  ⎿ 7 items: Priya Raman #launch (2), Sam, acme/web #412, Jordan #playtesters, Linear ENG-218, acme/api #97", "o"],
+    ["wait", 700],
+    ["out", "Three that matter:\n  1. Priya in #launch wants the pricing page checked before 9 (two messages).\n  2. Your review is requested on acme/web #412, the session refresh race fix.\n  3. Jordan reports a crash on level 3 when pausing in the boss fight.\nSam is running late and asks you to grab a table, a one-line reply.\nSnooze the rest until tomorrow?", "c"],
+    ["wait", 1500],
+    ["you", "> yes"],
+    ["wait", 400],
+    ["out", "● pile · snooze (ids: 6, 12, 7, 8, 9, ..., until: tomorrow)", "tool"],
+    ["out", "  ⎿ snoozed 13 until 09:00 tomorrow", "o"],
+    ["out", "Done. Four threads left in your inbox.", "c"],
+    ["wait", 2500],
+  ]},
+};
+const scene = SCENES[location.hash.slice(1)] || SCENES.setup;
+document.getElementById("title").textContent = scene.title;
+const out = document.getElementById("out");
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function add(text, cls){ const s = document.createElement("span"); s.className = cls || ""; s.textContent = text; out.appendChild(s); out.scrollTop = out.scrollHeight; return s; }
+const cursor = document.createElement("span"); cursor.className = "cur";
+async function type(text, cls){
+  out.appendChild(cursor);
+  const s = add("", cls); out.insertBefore(s, cursor);
+  for (const ch of text) { s.textContent += ch; out.scrollTop = out.scrollHeight; await sleep(ch === " " ? 45 : 28); }
+  await sleep(250); cursor.remove(); add("\n");
+}
+(async () => {
+  out.appendChild(cursor);
+  await sleep(300);
+  for (const [kind, text, cls] of scene.steps) {
+    if (kind === "wait") { out.appendChild(cursor); await sleep(text); cursor.remove(); continue; }
+    if (kind === "cmd") { cursor.remove(); add(scene.prompt, "p"); await type(text, "c"); continue; }
+    if (kind === "you") { cursor.remove(); await type(text, "you"); continue; }
+    if (kind === "out") { add(text + "\n", cls || "o"); await sleep(140); }
+  }
+  out.appendChild(cursor);
+  document.title = "done";
+})();
+</script>
+</body>
+</html>

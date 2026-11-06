@@ -111,7 +111,14 @@ def get(store, rule_id: int) -> Optional[dict]:
 
 
 def all_rules(store) -> list:
-    return [dict(r) for r in store.db.execute("SELECT * FROM rules ORDER BY created DESC, id DESC")]
+    out = []
+    for r in store.db.execute("SELECT * FROM rules ORDER BY created DESC, id DESC"):
+        r = dict(r)
+        if r["app"]:
+            seen = store.db.execute("SELECT app_name FROM items WHERE app=? LIMIT 1", (r["app"],)).fetchone()
+            r["app_name"] = seen["app_name"] if seen else deeplinks.app_name(r["app"])
+        out.append(r)
+    return out
 
 
 def delete(store, rule_id: int) -> bool:

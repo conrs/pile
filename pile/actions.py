@@ -1,6 +1,7 @@
 """The verbs the web UI and the MCP server share."""
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Union
@@ -54,9 +55,10 @@ def fix_link(store, item_id, url) -> dict:
     if not item:
         raise KeyError("no item %s" % item_id)
     rule = rules.learn_link(store, item, url)
-    return {"rule": rule, "now_opens": store.get(item_id)["link"],
-            "scope": ("every %s item" % item["app_name"]) if rule["sender"] is None
-            else ("%s in %s" % (item["sender"] or item["title"], item["app_name"]))}
+    fields = sorted(set(re.findall(r"\{(\w+)", rule["value"])))
+    scope = ("every %s item, filling in the %s" % (item["app_name"], " and ".join(f.replace("ext_id", "id") for f in fields))
+             if rule["sender"] is None else "%s in %s" % (item["sender"] or item["title"], item["app_name"]))
+    return {"rule": rule, "now_opens": store.get(item_id)["link"], "scope": scope}
 
 
 def teach_label(store, item_id, label, scope="sender") -> dict:

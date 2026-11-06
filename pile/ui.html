@@ -64,7 +64,7 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
 .zero .big{font-size:34px;font-weight:700;color:var(--text);letter-spacing:-.03em;margin:16px 0 6px}
 .keys{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(transparent,var(--bg) 35%);padding:26px 16px 14px}
 .keys div{max-width:880px;margin:0 auto;display:flex;gap:14px;flex-wrap:wrap;color:var(--faint);font-size:12px;justify-content:center}
-.toast{position:fixed;left:50%;bottom:62px;transform:translateX(-50%);background:var(--text);color:var(--bg);
+.toast{position:fixed;left:50%;top:16px;transform:translateX(-50%);background:var(--text);color:var(--bg);
   padding:8px 14px;border-radius:10px;font-weight:500;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw}
 .toast.show{opacity:1}
 .pop{position:fixed;inset:0;background:rgba(5,6,8,.6);display:none;align-items:flex-start;justify-content:center;padding-top:16vh;z-index:5}
@@ -261,7 +261,7 @@ function mute(){
 
 function describe(r){
   const scope = r.sender ? esc(r.note.replace(/^learned from: /, "")) : (r.app ? "every item" : "everything");
-  const app = r.app ? esc(r.app) : "any app";
+  const app = r.app ? esc(r.app_name || r.app) : "any app";
   if (r.kind === "link") return `<div><b>${scope}</b> · ${app}</div><div class="v">→ ${esc(r.value)}</div>`;
   if (r.kind === "label") return `<div><b>${scope}</b> is <span class="chip ${esc(r.value)}">${esc(r.value)}</span></div><div class="v">${app}</div>`;
   return `<div><b>${esc(r.note || r.app)}</b> muted</div><div class="v">${app}</div>`;
