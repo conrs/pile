@@ -49,6 +49,11 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
   pointer-events:none;transition:top .1s ease,height .1s ease}
 body.private #hl{background:#2b303b;box-shadow:inset 4px 0 0 var(--accent)}
 body.private .pickblock{background:rgba(255,181,71,.2)}
+/* On a selected row the cursor keeps the run's tint, so it reads as part of the selection. */
+#hl.inpick,body.private #hl.inpick{background:rgba(255,181,71,.16)}
+/* Driving by keyboard: a pointer resting over the list doesn't hover a row until it moves. */
+body.kbd .row:hover{background:none}
+body.kbd .row:hover:not(.sel) .acts{display:none}
 @media (prefers-reduced-motion:reduce){#hl,.pickblock{transition:none}}
 .followbadge{position:fixed;left:12px;bottom:12px;z-index:9;font-size:12px;font-weight:600;color:var(--accent-ink);
   background:var(--accent);border-radius:8px;padding:4px 9px}
@@ -319,6 +324,7 @@ function decorate(){
     if (!hl) { hl = document.createElement("div"); hl.id = "hl"; list.prepend(hl); }
     const r = rows[S.sel];
     if (r) { hl.style.top = r.offsetTop + "px"; hl.style.height = r.offsetHeight + "px"; }
+    hl.classList.toggle("inpick", !!(gs[S.sel] && P.has(gs[S.sel].lead.thread)));
     const runs = [];
     rows.forEach((el, i) => {
       if (!P.has(gs[i].lead.thread)) return;
@@ -684,7 +690,14 @@ function setPrivate(on){
 load(); loadRules();
 if (S.follow) followLoop();
 let lastKey = 0;
-document.addEventListener("keydown", () => { lastKey = Date.now(); }, true);
+document.addEventListener("keydown", () => { lastKey = Date.now(); document.body.classList.add("kbd"); }, true);
+// Scrolling under a still pointer fires mousemove in some browsers; only real movement hands control back to the mouse.
+let lastXY = null;
+document.addEventListener("mousemove", e => {
+  const xy = e.screenX + "," + e.screenY;
+  if (lastXY !== null && xy !== lastXY) document.body.classList.remove("kbd");
+  lastXY = xy;
+});
 setInterval(() => {
   if (!S.follow && !$("#pop").classList.contains("show") && document.visibilityState === "visible" && !S.pending && Date.now() - lastKey > 2000) load();
 }, 15000);
