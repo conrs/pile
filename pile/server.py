@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from . import actions, collectors, rules, triage
+from .collectors import webhook
 
 UI = os.path.join(os.path.dirname(__file__), "ui.html")
 
@@ -65,6 +66,17 @@ def make_handler(store, lock, collect_kwargs):
             self._send(404, {"error": "not found"})
 
         def do_POST(self):
+            if urlparse(self.path).path == "/ingest":  # token-gated, so it may face the LAN
+                if not webhook.authorized(store, self.headers.get("Authorization")):
+                    return self._send(401, {"error": "bad or missing token (see `pile token`)"})
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    if n > 65536:
+                        return self._send(413, {"error": "too big"})
+                    with lock:
+                        return self._send(200, webhook.ingest(store, json.loads(self.rfile.read(n) or b"{}")))
+                except (ValueError, TypeError) as e:
+                    return self._send(400, {"error": str(e)})
             # JSON content type forces a CORS preflight, which we never answer: no cross-site POSTs.
             if not self._local() or not (self.headers.get("Content-Type") or "").startswith("application/json"):
                 return self._send(403, {"error": "forbidden"})
@@ -84,9 +96,12 @@ def make_handler(store, lock, collect_kwargs):
     return Handler
 
 
-def serve(store, port=8765, watch=0, collect_kwargs=None):
+def serve(store, port=8765, watch=0, collect_kwargs=None, host="127.0.0.1"):
     lock = threading.Lock()
     collect_kwargs = collect_kwargs or {}
+    webhook.token(store)
+    if watch:
+        collectors.start_listeners(store, lock, threading.Event(), **collect_kwargs)
     if watch:
         def loop():
             ev = threading.Event()
@@ -95,8 +110,10 @@ def serve(store, port=8765, watch=0, collect_kwargs=None):
                     collectors.run_all(store, quiet=True, **collect_kwargs)
                 ev.wait(watch)
         threading.Thread(target=loop, daemon=True).start()
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(store, lock, collect_kwargs))
+    httpd = ThreadingHTTPServer((host, port), make_handler(store, lock, collect_kwargs))
     print("pile: http://127.0.0.1:%d  (Ctrl-C to stop)" % port)
+    if host != "127.0.0.1":
+        print("pile: POST /ingest also open on %s:%d (token-protected; the UI stays local-only)" % (host, port))
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -5,7 +5,9 @@ Learned rules (see rules.py) beat this table. Anything not listed falls back to
 """
 from __future__ import annotations
 
+import os
 import platform
+import shutil
 import subprocess
 import webbrowser
 
@@ -56,7 +58,13 @@ def open_link(link: str) -> str:
     """Open a deep link on this machine. Returns what it did."""
     if not link:
         return "nothing to open"
-    mac = platform.system() == "Darwin"
+    if os.environ.get("PILE_NO_OPEN"):  # dry run, for recordings and tests
+        return "would open " + link
+    system = platform.system()
+    mac = system == "Darwin"
+    if system == "Windows":
+        os.startfile(link[len("bundle:"):] if link.startswith("bundle:") else link)
+        return "opened " + link
     if link.startswith("bundle:"):
         if mac:
             subprocess.run(["open", "-b", link[len("bundle:"):]], check=False)
@@ -68,4 +76,7 @@ def open_link(link: str) -> str:
     if link.startswith(("http://", "https://")):
         webbrowser.open(link)
         return "opened " + link
-    return "would open " + link + " (macOS only)"
+    if shutil.which("xdg-open") and (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        subprocess.run(["xdg-open", link], check=False)
+        return "opened " + link
+    return "would open " + link + " (no desktop to open it on)"

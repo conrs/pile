@@ -14,6 +14,10 @@ from typing import Optional
 from .. import deeplinks
 
 NAME = "macos"
+PLATFORMS = ("darwin",)
+NEEDS = "Full Disk Access for your terminal"
+ORDER = 10
+PATH_OPT = "macos_db"
 MAC_EPOCH = 978307200  # 2001-01-01 in unix seconds
 
 
@@ -31,8 +35,18 @@ def default_db() -> Optional[str]:
     return None
 
 
-def available(db_path: Optional[str] = None) -> bool:
-    return bool(db_path or default_db())
+def check(macos_db: Optional[str] = None, **_):
+    path = macos_db or default_db()
+    if not path:
+        return False, "Notification Center database not found"
+    try:
+        src = sqlite3.connect("file:" + path + "?mode=ro", uri=True)
+        src.execute("SELECT 1 FROM record LIMIT 1").fetchall()
+        src.close()
+    except sqlite3.Error:
+        return False, ("can't read it: System Settings > Privacy & Security > Full Disk Access,"
+                       " add your terminal app, then restart the terminal")
+    return True, "reading " + path
 
 
 def _text(v) -> str:
@@ -68,8 +82,8 @@ def parse_record(rec_id: int, identifier: Optional[str], data: bytes, delivered:
     }
 
 
-def collect(store, db_path: Optional[str] = None) -> int:
-    path = db_path or default_db()
+def collect(store, macos_db: Optional[str] = None, **_) -> int:
+    path = macos_db or default_db()
     if not path:
         return 0
     try:

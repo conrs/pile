@@ -22,7 +22,7 @@ class MacOSTest(unittest.TestCase):
         self.s = store.Store(os.path.join(self.dir, "inbox.db"))
 
     def test_reads_records_with_deep_links(self):
-        self.assertEqual(macos.collect(self.s, self.nc), 3)
+        self.assertEqual(macos.collect(self.s, macos_db=self.nc), 3)
         items = {i["app"]: i for i in self.s.items()}
         slack = items["com.tinyspeck.slackmacgap"]
         self.assertEqual((slack["sender"], slack["title"], slack["body"]), ("Priya Raman", "#launch", "pricing page?"))
@@ -34,13 +34,13 @@ class MacOSTest(unittest.TestCase):
         self.assertEqual((web["app_name"], web["link"]), ("calendar.example.com", "https://calendar.example.com"))
 
     def test_watermark_skips_seen_records(self):
-        macos.collect(self.s, self.nc)
-        self.assertEqual(macos.collect(self.s, self.nc), 0)
+        macos.collect(self.s, macos_db=self.nc)
+        self.assertEqual(macos.collect(self.s, macos_db=self.nc), 0)
         self.assertEqual(self.s.get_meta("macos.rec_id"), "3")
 
     def test_unknown_app_opens_the_app(self):
         make_nc_db(os.path.join(self.dir, "db2"), [("com.example.Thing", "Hi", None, "x", T0)])
-        macos.collect(self.s, os.path.join(self.dir, "db2"))
+        macos.collect(self.s, macos_db=os.path.join(self.dir, "db2"))
         self.assertEqual(self.s.items()[0]["link"], "bundle:com.example.Thing")
 
     def test_garbage_plist_is_skipped(self):

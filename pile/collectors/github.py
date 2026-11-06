@@ -11,6 +11,9 @@ from datetime import datetime
 from typing import Optional
 
 NAME = "github"
+PLATFORMS = ("any",)
+NEEDS = "a GitHub token (GITHUB_TOKEN, or the gh CLI logged in)"
+ORDER = 40
 API = "https://api.github.com"
 
 
@@ -27,8 +30,10 @@ def token() -> Optional[str]:
     return None
 
 
-def available() -> bool:
-    return bool(token())
+def check(**_):
+    if token():
+        return True, "token found"
+    return False, "no token: set GITHUB_TOKEN (notifications scope) or run `gh auth login`"
 
 
 def html_url(n: dict) -> str:
@@ -104,7 +109,7 @@ def ingest(store, notifications: list) -> int:
     return n
 
 
-def collect(store, notifications: Optional[list] = None) -> int:
+def collect(store, notifications: Optional[list] = None, **_) -> int:
     if notifications is None:
         tok = token()
         if not tok:

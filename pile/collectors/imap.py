@@ -15,11 +15,20 @@ from typing import Optional
 from urllib.parse import quote
 
 NAME = "imap"
+PLATFORMS = ("any",)
+NEEDS = "an IMAP login (Gmail: an app password)"
+ORDER = 45
 MAX = 50
 
 
 def available() -> bool:
     return bool(os.environ.get("PILE_IMAP_USER") and os.environ.get("PILE_IMAP_PASSWORD"))
+
+
+def check(**_):
+    if available():
+        return True, "%s at %s" % (os.environ["PILE_IMAP_USER"], os.environ.get("PILE_IMAP_HOST", "imap.gmail.com"))
+    return False, "set PILE_IMAP_USER and PILE_IMAP_PASSWORD (Gmail: myaccount.google.com/apppasswords)"
 
 
 def _decode(v: Optional[str]) -> str:
@@ -79,7 +88,7 @@ def to_item(raw: bytes, host: str) -> dict:
     }
 
 
-def collect(store) -> int:
+def collect(store, **_) -> int:
     if not available():
         return 0
     host = os.environ.get("PILE_IMAP_HOST", "imap.gmail.com")

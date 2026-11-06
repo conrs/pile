@@ -20,40 +20,64 @@ def open_store(args):
     return s
 
 
+def doctor(s, kw):
+    import platform
+    print("pile %s on %s (Python %s)" % (__version__, collectors.this_os(), platform.python_version()))
+    print("database: %s\n" % s.path)
+    for mod, ok, msg in collectors.status(kw):
+        mark = {True: "ok ", False: "-- ", None: "   "}[ok]
+        print("  %s %-9s %s" % (mark, mod.NAME, msg))
+    print("\n  triage    " + ("model: %s" % triage.config()[1] if triage.config()
+                               else "off (set PILE_BASE_URL and PILE_MODEL to label with a model)"))
+    print("  your collectors: %s" % collectors.user_dir())
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="pile", description=__doc__)
     p.add_argument("--db", help="SQLite file (default ~/.local/share/pile/inbox.db)")
     p.add_argument("--demo", action="store_true", help="use a separate demo database seeded with fake items")
-    p.add_argument("--macos-db", help="read this Notification Center database instead of the system one")
+    p.add_argument("--macos-db", help="read this macOS Notification Center database (a copy or a fixture)")
+    p.add_argument("--windows-db", help="read this Windows wpndatabase.db (a copy or a fixture)")
     p.add_argument("--version", action="version", version="pile " + __version__)
     sub = p.add_subparsers(dest="cmd")
-    sub.add_parser("collect", help="run every configured collector once")
+    sub.add_parser("doctor", help="which collectors work on this machine, and how to turn on the rest")
+    sub.add_parser("collect", help="run every ready collector once")
     w = sub.add_parser("watch", help="collect every N seconds")
     w.add_argument("--every", type=int, default=30)
     sv = sub.add_parser("serve", help="the web UI on http://127.0.0.1:8765")
     sv.add_argument("--port", type=int, default=8765)
     sv.add_argument("--watch", type=int, default=30, help="collect every N seconds while serving (0 = off)")
+    sv.add_argument("--listen", default="127.0.0.1",
+                    help="address to bind; 0.0.0.0 lets phones on your LAN POST /ingest (the UI stays local-only)")
     sub.add_parser("mcp", help="MCP server on stdio, for Claude and other agents")
     sub.add_parser("triage", help="label new items: your rules first, then a model if configured")
     sub.add_parser("rules", help="print what pile has learned")
     sub.add_parser("list", help="print the inbox")
+    sub.add_parser("token", help="print the token for POST /ingest")
     args = p.parse_args(argv)
     if not args.cmd:
         p.print_help()
         return
     s = open_store(args)
-    kw = {"macos_db": args.macos_db}
+    kw = {k: v for k, v in (("macos_db", args.macos_db), ("windows_db", args.windows_db)) if v}
 
-    if args.cmd == "collect":
+    if args.cmd == "doctor":
+        doctor(s, kw)
+    elif args.cmd == "token":
+        from .collectors import webhook
+        print(webhook.token(s))
+    elif args.cmd == "collect":
         print(json.dumps(collectors.run_all(s, **kw)))
     elif args.cmd == "watch":
+        import threading
+        collectors.start_listeners(s, threading.Lock(), threading.Event(), **kw)
         while True:
             counts = collectors.run_all(s, **kw)
             print(time.strftime("%H:%M:%S"), json.dumps(counts), flush=True)
             time.sleep(args.every)
     elif args.cmd == "serve":
         from . import server
-        server.serve(s, args.port, 0 if args.demo else args.watch, kw)
+        server.serve(s, args.port, 0 if args.demo else args.watch, kw, args.listen)
     elif args.cmd == "mcp":
         from . import mcp
         mcp.serve(s)
