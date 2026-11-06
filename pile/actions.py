@@ -30,19 +30,21 @@ def parse_until(until: Union[str, int, float], now: float = None) -> float:
 
 def snooze(store, ids, until) -> dict:
     t = parse_until(until)
-    n = store.set_state(ids, "snoozed", t)
-    store.log("snooze", ids, until=t)
+    with store.recording("snooze", ids, until=t):
+        n = store.set_state(ids, "snoozed", t)
     return {"snoozed": n, "until": datetime.fromtimestamp(t).isoformat(timespec="minutes")}
 
 
 def done(store, ids) -> dict:
-    store.log("done", ids)
-    return {"done": store.set_state(ids, "done")}
+    with store.recording("done", ids):
+        n = store.set_state(ids, "done")
+    return {"done": n}
 
 
 def reopen(store, ids) -> dict:
-    store.log("reopen", ids)
-    return {"reopened": store.set_state(ids, "new")}
+    with store.recording("reopen", ids):
+        n = store.set_state(ids, "new")
+    return {"reopened": n}
 
 
 def open_item(store, item_id) -> dict:
@@ -58,8 +60,8 @@ def fix_link(store, item_id, url) -> dict:
     item = store.get(item_id)
     if not item:
         raise KeyError("no item %s" % item_id)
-    rule = rules.learn_link(store, item, url)
-    store.log("fix_link", [item["id"]], url=url, template=rule["value"], generic=rule["sender"] is None)
+    with store.recording("fix_link", [item["id"]], url=url):
+        rule = rules.learn_link(store, item, url)
     fields = sorted(set(re.findall(r"\{(\w+)", rule["value"])))
     scope = ("every %s item, filling in the %s" % (item["app_name"], " and ".join(f.replace("ext_id", "id") for f in fields))
              if rule["sender"] is None else "%s in %s" % (item["sender"] or item["title"], item["app_name"]))
@@ -72,17 +74,19 @@ def teach_label(store, item_id, label, scope="sender") -> dict:
     if not item:
         raise KeyError("no item %s" % item_id)
     sender = None if scope == "app" else (item["thread"] or item["sender"])
-    store.log("label", [item["id"]], label=label, scope=scope)
-    return {"rule": rules.add(store, "label", label, app=item["app"], sender=sender,
-                              note=(item["sender"] or item["title"]) if sender else item["app_name"])}
+    with store.recording("label", [item["id"]], label=label, scope=scope):
+        rule = rules.add(store, "label", label, app=item["app"], sender=sender,
+                         note=(item["sender"] or item["title"]) if sender else item["app_name"])
+    return {"rule": rule}
 
 
 def mute_app(store, item_id) -> dict:
     item = store.get(item_id)
     if not item:
         raise KeyError("no item %s" % item_id)
-    store.log("mute", [item["id"]], app=item["app"])
-    return {"rule": rules.add(store, "mute", app=item["app"], note=item["app_name"])}
+    with store.recording("mute", [item["id"]], app=item["app"]):
+        rule = rules.add(store, "mute", app=item["app"], note=item["app_name"])
+    return {"rule": rule}
 
 
 def group(store, item_id, with_id) -> dict:
@@ -92,9 +96,9 @@ def group(store, item_id, with_id) -> dict:
         raise KeyError("no such item")
     if a["thread"] == b["thread"]:
         return {"rule": None, "thread": a["thread"]}
-    store.log("group", [item_id, with_id])
-    rule = rules.add(store, "group", a["thread"], app=b["app"], sender=b["thread"],
-                     note="%s + %s" % (a["sender"] or a["title"], b["sender"] or b["title"]))
+    with store.recording("group", [item_id, with_id]):
+        rule = rules.add(store, "group", a["thread"], app=b["app"], sender=b["thread"],
+                         note="%s + %s" % (a["sender"] or a["title"], b["sender"] or b["title"]))
     return {"rule": rule, "thread": a["thread"]}
 
 
@@ -103,7 +107,58 @@ def ungroup(store, item_id) -> dict:
     item = store.get(item_id)
     if not item:
         raise KeyError("no item %s" % item_id)
-    n = store.db.execute("DELETE FROM rules WHERE kind='group' AND (value=? OR sender=?)",
-                         (item["thread"], item.get("raw_thread") or item["thread"])).rowcount
-    store.log("ungroup", [item_id])
+    with store.recording("ungroup", [item_id]):
+        n = store.db.execute("DELETE FROM rules WHERE kind='group' AND (value=? OR sender=?)",
+                             (item["thread"], item.get("raw_thread") or item["thread"])).rowcount
     return {"forgot": n}
+
+
+def undo(store, steps=1) -> dict:
+    return store.undo(steps)
+
+
+def redo(store, steps=1) -> dict:
+    return store.redo(steps)
+
+
+def teach_labels(store, ids, label, scope="sender") -> dict:
+    """teach_label for several rows, as one undoable action."""
+    ids = [int(i) for i in ids]
+    out = []
+    with store.recording("label", ids, label=label, scope=scope):
+        for i in ids:
+            item = store.get(i)
+            if not item:
+                raise KeyError("no item %s" % i)
+            sender = None if scope == "app" else (item["thread"] or item["sender"])
+            out.append(rules.add(store, "label", label, app=item["app"], sender=sender,
+                                 note=(item["sender"] or item["title"]) if sender else item["app_name"]))
+    return {"rules": out}
+
+
+def mute_apps(store, ids) -> dict:
+    ids = [int(i) for i in ids]
+    out, seen = [], set()
+    with store.recording("mute", ids):
+        for i in ids:
+            item = store.get(i)
+            if item and item["app"] not in seen:
+                seen.add(item["app"])
+                out.append(rules.add(store, "mute", app=item["app"], note=item["app_name"]))
+    return {"rules": out}
+
+
+def combine(store, ids) -> dict:
+    """Fold several rows into one conversation: the newest row's thread. One undoable action."""
+    items = [store.get(int(i)) for i in ids]
+    items = [i for i in items if i]
+    if len(items) < 2:
+        raise ValueError("select at least two rows")
+    target = max(items, key=lambda i: i["at"])
+    out = []
+    with store.recording("combine", [i["id"] for i in items]):
+        for it in items:
+            if it["thread"] != target["thread"]:
+                out.append(rules.add(store, "group", target["thread"], app=it["app"], sender=it["thread"],
+                                     note="%s + %s" % (target["sender"] or target["title"], it["sender"] or it["title"])))
+    return {"thread": target["thread"], "rules": out}

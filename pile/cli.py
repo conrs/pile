@@ -73,6 +73,10 @@ def main(argv=None):
     hi = sub.add_parser(parents=[common], name="history", help="what you did, newest first")
     hi.add_argument("--limit", type=int, default=50)
     hi.add_argument("--json", action="store_true")
+    un = sub.add_parser(parents=[common], name="undo", help="undo the last change (repeat to go further back)")
+    un.add_argument("--steps", type=int, default=1)
+    rd = sub.add_parser(parents=[common], name="redo", help="redo what undo undid")
+    rd.add_argument("--steps", type=int, default=1)
     ro = sub.add_parser(parents=[common], name="reopen", help="put done and snoozed items back in the inbox")
     ro.add_argument("--since", help="only items cleared in the last 30m, 2h, 1d ...")
     ro.add_argument("--all", action="store_true", help="every done and snoozed item")
@@ -132,6 +136,11 @@ def main(argv=None):
             print("%s  %-8s %5s  %-10s %-22s %s" % (time.strftime("%m-%d %H:%M", time.localtime(r["at"])), r["action"],
                                                   r["item_id"] or "", (r["app_name"] or "")[:10],
                                                   (r["sender"] or r["title"] or "")[:22], what[:60]))
+    elif args.cmd in ("undo", "redo"):
+        r = s.undo(args.steps) if args.cmd == "undo" else s.redo(args.steps)
+        for what in r["undid" if args.cmd == "undo" else "redid"] or ["nothing to %s" % args.cmd]:
+            print(("undid: " if args.cmd == "undo" else "redid: ") + what if not what.startswith("nothing") else what)
+        print("%d more to undo, %d to redo" % (r["remaining"], r["redoable"]), file=sys.stderr)
     elif args.cmd == "reopen":
         if not (args.since or args.all or args.source):
             p.error("reopen needs --since, --all or --source")
@@ -139,8 +148,8 @@ def main(argv=None):
         since = None
         if args.since:
             since = time.time() - (parse_until(args.since) - time.time())
-        n = s.reopen(since, args.source)
-        s.log("reopen_bulk", (None,), since=args.since, source=args.source, count=n)
+        with s.recording("reopen_all", (), since=args.since, source=args.source):
+            n = s.reopen(since, args.source)
         print("reopened %d" % n)
     elif args.cmd == "list":
         items = s.items(args.state, args.source)

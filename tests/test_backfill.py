@@ -123,7 +123,8 @@ class HistoryAndReopenTest(unittest.TestCase):
         actions.snooze(self.s, ids[2:], "1h")
         actions.teach_label(self.s, ids[0], "noise")
         h = self.s.history()
-        self.assertEqual([r["action"] for r in h[:4]], ["label", "snooze", "done", "done"])
+        self.assertEqual([r["action"] for r in h[:3]], ["label", "snooze", "done"])
+        self.assertEqual(h[2]["detail"]["ids"], ids[:2])
         self.assertEqual(h[0]["detail"]["label"], "noise")
 
     def test_reopen(self):

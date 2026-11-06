@@ -1,6 +1,7 @@
 """One SQLite file holds every item, the collectors' watermarks and the learned rules."""
 from __future__ import annotations
 
+import contextlib
 import os
 import sqlite3
 import time
@@ -67,6 +68,10 @@ class Store:
         for col, decl in (("tag", "TEXT"), ("changed_at", "REAL")):  # added after 0.1.0
             if col not in cols:
                 self.db.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(actions)")}
+        for col in ("change", "undone"):  # change: what to restore; undone: NULL live, >0 undone (redoable), 0 dead
+            if col not in cols:
+                self.db.execute("ALTER TABLE actions ADD COLUMN %s %s" % (col, "TEXT" if col == "change" else "REAL"))
         # 0.1.x grouped group chats by sender; re-key them by the group's name (kept in title).
         from .collectors.macos import GROUP_CHAT_APPS
         marks = ",".join("?" * len(GROUP_CHAT_APPS))
@@ -165,12 +170,96 @@ class Store:
             if r["ext_id"] not in live]
         return self.set_state(gone, "done")
 
-    def log(self, action: str, item_ids=(None,), **detail) -> None:
+    def log(self, action: str, item_ids=(), change=None, **detail) -> int:
         import json
-        now = time.time()
-        for i in (item_ids or (None,)):
-            self.db.execute("INSERT INTO actions(at, action, item_id, detail) VALUES(?,?,?,?)",
-                            (now, action, i, json.dumps(detail, ensure_ascii=False)))
+        ids = [i for i in (item_ids or ()) if i is not None]
+        detail = dict(detail, ids=ids) if len(ids) > 1 else detail
+        cur = self.db.execute("INSERT INTO actions(at, action, item_id, detail, change) VALUES(?,?,?,?,?)",
+                              (time.time(), action, ids[0] if ids else None, json.dumps(detail, ensure_ascii=False),
+                               json.dumps(change) if change else None))
+        return cur.lastrowid
+
+    _SNAP = "SELECT id, state, snooze_until, changed_at, label, label_by FROM items"
+
+    def _snapshot(self):
+        items = {r[0]: list(r[1:]) for r in self.db.execute(self._SNAP)}
+        rules = {r["id"]: dict(r) for r in self.db.execute("SELECT * FROM rules")}
+        return items, rules
+
+    @contextlib.contextmanager
+    def recording(self, action: str, item_ids=(), **detail):
+        """Run a change and log it with everything needed to undo and redo it."""
+        bi, br = self._snapshot()
+        yield
+        ai, ar = self._snapshot()
+        changed = [i for i in ai if i in bi and bi[i] != ai[i]]
+        change = {"items_before": {i: bi[i] for i in changed}, "items_after": {i: ai[i] for i in changed},
+                  # A replaced rule can reuse its id, so "changed" counts as removed-then-added.
+                  "rules_added": [ar[k] for k in ar if br.get(k) != ar[k]],
+                  "rules_removed": [br[k] for k in br if ar.get(k) != br[k]]}
+        if not any(change.values()):
+            change = None
+        self.log(action, item_ids, change, **detail)
+        if change:  # a new change ends the redo chain
+            self.db.execute("UPDATE actions SET undone=0 WHERE undone>0")
+
+    def _apply(self, change: dict, forward: bool) -> None:
+        items = change["items_after" if forward else "items_before"]
+        for i, (state, snooze, changed_at, label, label_by) in items.items():
+            self.db.execute("UPDATE items SET state=?, snooze_until=?, changed_at=?, label=?, label_by=? WHERE id=?",
+                            (state, snooze, changed_at, label, label_by, int(i)))
+        drop, put = ((change["rules_removed"], change["rules_added"]) if forward
+                     else (change["rules_added"], change["rules_removed"]))
+        for r in drop:
+            self.db.execute("DELETE FROM rules WHERE id=?", (r["id"],))
+        for r in put:
+            keys = list(r)
+            self.db.execute("INSERT OR REPLACE INTO rules(%s) VALUES(%s)" % (",".join(keys), ",".join("?" * len(keys))),
+                            [r[k] for k in keys])
+
+    def _describe(self, row) -> str:
+        import json
+        name = ""
+        if row["item_id"]:
+            it = self.db.execute("SELECT sender, title, app_name FROM items WHERE id=?", (row["item_id"],)).fetchone()
+            if it:
+                name = it["sender"] or it["title"] or it["app_name"]
+        n = len(json.loads(row["detail"] or "{}").get("ids") or [])
+        return row["action"].replace("_", " ") + (" · " + name if name else "") + (" +%d" % (n - 1) if n > 1 else "")
+
+    def undo_depth(self) -> int:
+        return self.db.execute("SELECT COUNT(*) FROM actions WHERE change IS NOT NULL AND undone IS NULL").fetchone()[0]
+
+    def undo(self, steps: int = 1) -> dict:
+        """Undo the most recent live changes, newest first. Persisted, so it works across restarts."""
+        import json
+        done = []
+        for _ in range(max(1, int(steps))):
+            row = self.db.execute("SELECT * FROM actions WHERE change IS NOT NULL AND undone IS NULL"
+                                  " ORDER BY id DESC LIMIT 1").fetchone()
+            if not row:
+                break
+            self._apply(json.loads(row["change"]), forward=False)
+            self.db.execute("UPDATE actions SET undone=? WHERE id=?", (time.time(), row["id"]))
+            self.log("undo", [row["item_id"]] if row["item_id"] else (), of=row["id"])
+            done.append(self._describe(row))
+        return {"undid": done, "remaining": self.undo_depth(), "redoable": self.redo_depth()}
+
+    def redo_depth(self) -> int:
+        return self.db.execute("SELECT COUNT(*) FROM actions WHERE undone > 0").fetchone()[0]
+
+    def redo(self, steps: int = 1) -> dict:
+        import json
+        done = []
+        for _ in range(max(1, int(steps))):
+            row = self.db.execute("SELECT * FROM actions WHERE undone > 0 ORDER BY undone DESC, id DESC LIMIT 1").fetchone()
+            if not row:
+                break
+            self._apply(json.loads(row["change"]), forward=True)
+            self.db.execute("UPDATE actions SET undone=NULL WHERE id=?", (row["id"],))
+            self.log("redo", [row["item_id"]] if row["item_id"] else (), of=row["id"])
+            done.append(self._describe(row))
+        return {"redid": done, "remaining": self.undo_depth(), "redoable": self.redo_depth()}
 
     def history(self, limit: int = 200) -> list:
         import json
@@ -179,6 +268,7 @@ class Store:
                                  " ON i.id = a.item_id ORDER BY a.at DESC, a.id DESC LIMIT ?", (int(limit),)):
             r = dict(r)
             r["detail"] = json.loads(r["detail"] or "{}")
+            r["undoable"] = r.pop("change") is not None
             out.append(r)
         return out
 

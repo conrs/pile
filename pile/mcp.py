@@ -40,6 +40,11 @@ TOOLS = [
          "kind": {"type": "string", "enum": list(rules.KINDS)},
          "match": {"type": "object", "properties": {"app": {"type": "string"}, "sender": {"type": "string"}}},
          "value": {"type": "string"}}, "required": ["kind"]}},
+    {"name": "undo", "description": "Undo the user's (or your) most recent changes, newest first: done, snooze, "
+     "reopen, labels, mute, groupings, link fixes. Repeatable all the way back.",
+     "inputSchema": {"type": "object", "properties": {"steps": {"type": "integer", "default": 1}}}},
+    {"name": "redo", "description": "Redo what undo just undid.",
+     "inputSchema": {"type": "object", "properties": {"steps": {"type": "integer", "default": 1}}}},
     {"name": "history", "description": "What the user did recently (open, done, snooze, label, mute, fix_link, group), newest first.",
      "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}},
     {"name": "list_rules", "description": "Everything pile has learned (link fixes, labels, muted apps).",
@@ -85,6 +90,10 @@ def call(store, name: str, a: dict):
         m = a.get("match") or {}
         return rules.add(store, a["kind"], a.get("value", ""), app=m.get("app"), sender=m.get("sender"),
                          note="set by agent")
+    if name == "undo":
+        return actions.undo(store, a.get("steps", 1))
+    if name == "redo":
+        return actions.redo(store, a.get("steps", 1))
     if name == "history":
         return {"actions": store.history(int(a.get("limit", 50)))}
     if name == "list_rules":
