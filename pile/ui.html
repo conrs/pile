@@ -90,7 +90,8 @@ body.private .row.picked{background:rgba(255,181,71,.16);box-shadow:inset 6px 0 
 .card input:focus{border-color:var(--accent)}
 .opts{display:flex;flex-direction:column;gap:6px}
 .opts button{display:flex;justify-content:space-between;text-align:left;padding:9px 12px;border-radius:9px;background:var(--bg);border:1px solid var(--line)}
-.opts button:hover{border-color:var(--accent)}
+.opts button:hover,.opts button.hl{border-color:var(--accent)}
+.opts button.hl{background:var(--raise)}
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(420px,100vw);background:var(--panel);border-left:1px solid var(--line);
   transform:translateX(100%);transition:transform .2s;z-index:6;padding:20px;overflow:auto}
 .drawer.show{transform:none}
@@ -287,7 +288,8 @@ async function openSel(){
   } catch (err) { toast("Couldn't open: " + err.message); }
 }
 
-function modal(html, onkey){ $("#popcard").innerHTML = html; $("#pop").classList.add("show"); modal.onkey = onkey; const inp = $("#popcard input"); if (inp) inp.focus(); }
+function modal(html, onkey){ $("#popcard").innerHTML = html; $("#pop").classList.add("show"); modal.onkey = onkey; const inp = $("#popcard input"); if (inp) inp.focus();
+  const first = $("#popcard .opts button"); if (first && !inp) first.classList.add("hl"); }
 function closeModal(){ $("#pop").classList.remove("show"); modal.onkey = null; }
 $("#pop").addEventListener("click", e => { if (e.target.id === "pop") closeModal(); });
 
@@ -424,6 +426,14 @@ document.addEventListener("keydown", e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if ($("#pop").classList.contains("show")) {
     if (e.key === "Escape") { closeModal(); return; }
+    // Option menus: arrows or j/k move the highlight, Enter picks it (the first option is highlighted to start).
+    const opts = [...document.querySelectorAll("#popcard .opts button")];
+    if (opts.length && e.target.tagName !== "INPUT") {
+      const at = Math.max(0, opts.findIndex(b => b.classList.contains("hl")));
+      const step = {ArrowDown: 1, j: 1, ArrowUp: -1, k: -1}[e.key];
+      if (step) { opts[at].classList.remove("hl"); opts[(at + step + opts.length) % opts.length].classList.add("hl"); e.preventDefault(); return; }
+      if (e.key === "Enter") { e.preventDefault(); opts[at].click(); return; }
+    }
     if (modal.onkey && e.target.tagName !== "INPUT" && modal.onkey(e.key)) e.preventDefault();
     return;
   }
