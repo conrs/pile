@@ -138,7 +138,7 @@ body.private .privbadge{display:inline-block}
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
-const S = {picked: new Set(), anchor: null, items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
+const S = {toggled: new Set(), anchor: null, items: [], stats: {}, view: "new", source: "", filter: "", sel: 0, asked: null, undo: null, rules: []};
 const SOURCES = {macos: "Notifications", github: "GitHub", imap: "Mail", demo: "Demo"};
 const VIEWS = [["new", "Inbox"], ["unanswered", "Unanswered"], ["sift", "Sift"], ["snoozed", "Snoozed"], ["done", "Done"]];
 
@@ -201,8 +201,10 @@ function render(){
   const gs = groups();
   S.sel = Math.max(0, Math.min(S.sel, gs.length - 1));
   const live = new Set(gs.map(g => g.lead.thread));
-  for (const t of [...S.picked]) if (!live.has(t)) S.picked.delete(t);
-  $("#picked").innerHTML = S.picked.size ? `<b>${S.picked.size}</b> selected · <kbd>esc</kbd> clears` : "";
+  for (const t of [...S.toggled]) if (!live.has(t)) S.toggled.delete(t);
+  if (S.anchor !== null && !live.has(S.anchor)) S.anchor = null;
+  const P = pickedSet(gs);  // the one source of truth for highlight and actions
+  $("#picked").innerHTML = P.size ? `<b>${P.size}</b> selected · <kbd>Esc</kbd> to clear` : "";
   if (!gs.length) {
     const wake = st.next_wake ? new Date(st.next_wake * 1000).toLocaleString([], {weekday: "short", hour: "numeric", minute: "2-digit"}) : "";
     $("#list").innerHTML = S.view === "new" && !S.filter ? `<div class="zero">
@@ -215,7 +217,7 @@ function render(){
   $("#list").innerHTML = `<div class="list">` + gs.map((g, i) => {
     const it = g.lead, name = it.sender || it.app_name;
     const ask = S.asked === it.id ? `<div class="ask">Did that land in the right place? <button data-act="yes"><kbd>y</kbd> Yes</button><button data-act="no"><kbd>n</kbd> No, fix it</button></div>` : "";
-    return `<div class="row src-${esc(it.source)} ${i === S.sel ? "sel" : ""} ${S.picked.has(it.thread) ? "picked" : ""} ${it.label === "noise" ? "noiserow" : ""}" data-i="${i}">
+    return `<div class="row src-${esc(it.source)} ${i === S.sel ? "sel" : ""} ${P.has(it.thread) ? "picked" : ""} ${it.label === "noise" ? "noiserow" : ""}" data-i="${i}">
       <div class="av" style="background:${color(it.app_name)}">${esc(it.app_name[0] || "?")}</div>
       <div class="main"><div class="l1"><span class="who">${esc(name)}</span><span class="app">${esc(it.app_name)}</span>
         ${it.label ? `<span class="chip ${esc(it.label)}">${esc(it.label)}</span>` : ""}
@@ -227,7 +229,7 @@ function render(){
         <button data-a="open" title="Open (o)">Open</button><button data-a="done" title="${S.view === "done" ? "Back to inbox (e)" : "Done (e)"}">${S.view === "done" ? "Undone" : "Done"}</button>
         <button data-a="snooze" title="Snooze (s)">Snooze</button><button data-a="imp" title="Always important (+)">+</button>
         <button data-a="noise" title="Not important (-)">−</button><button data-a="fix" title="Fix where it opens (f)">Fix link</button>
-        <button data-a="pick" title="Select (x)">${S.picked.has(it.thread) ? "Unselect" : "Select"}</button><button data-a="combine" title="Combine selected (c)">Combine</button>
+        <button data-a="pick" title="Select (x)">${P.has(it.thread) ? "Unselect" : "Select"}</button><button data-a="combine" title="Combine selected (c)">Combine</button>
         <button data-a="mute" title="Mute app (m)">Mute</button></div>
       <div class="side"><span class="when">${ago(it.at)}</span>${g.items.length > 1 ? `<span class="more">${g.items.length}</span>` : ""}</div>
       ${ask}</div>`;
@@ -240,12 +242,25 @@ function current(){ return groups()[S.sel]; }
 // The selected rows, or just the current one. Every batch is one history entry, so one undo.
 function targets(){
   const gs = groups();
-  const picked = gs.filter(g => S.picked.has(g.lead.thread));
+  const P = pickedSet(gs);
+  const picked = gs.filter(g => P.has(g.lead.thread));
   return picked.length ? picked : (gs[S.sel] ? [gs[S.sel]] : []);
 }
-function pick(i, on){ const g = groups()[i]; if (!g) return; const t = g.lead.thread; (on === undefined ? !S.picked.has(t) : on) ? S.picked.add(t) : S.picked.delete(t); }
-function pickRange(a, b){ for (let i = Math.min(a, b); i <= Math.max(a, b); i++) pick(i, true); }
-function clearPicks(){ S.picked.clear(); S.anchor = null; }
+// Selection = rows toggled with x / Cmd-click, plus the live shift range from the anchor to the cursor
+// (like vim's visual mode: moving back toward the anchor shrinks it, passing it flips direction).
+function pickedSet(gs){
+  gs = gs || groups();
+  const set = new Set(S.toggled);
+  if (S.anchor !== null) {
+    const a = gs.findIndex(g => g.lead.thread === S.anchor);
+    if (a >= 0) for (let i = Math.min(a, S.sel); i <= Math.max(a, S.sel); i++) if (gs[i]) set.add(gs[i].lead.thread);
+  }
+  return set;
+}
+function commitRange(){ for (const t of pickedSet()) S.toggled.add(t); S.anchor = null; }
+function pick(i){ commitRange(); const g = groups()[i]; if (!g) return; const t = g.lead.thread; S.toggled.has(t) ? S.toggled.delete(t) : S.toggled.add(t); }
+function extend(step, n){ if (S.anchor === null && groups()[S.sel]) S.anchor = groups()[S.sel].lead.thread; S.sel = Math.max(0, Math.min(n - 1, S.sel + step)); }
+function clearPicks(){ S.toggled.clear(); S.anchor = null; }
 async function act(kind, until){
   const gs = targets(); if (!gs.length) return;
   const ids = gs.flatMap(g => g.items.map(x => x.id));
@@ -320,8 +335,8 @@ function mute(){
 // c: combine the selected rows into one conversation (the newest row's). With nothing selected, start a selection.
 async function combine(){
   const gs = targets();
-  if (S.picked.size < 2) {
-    if (!S.picked.size && gs[0]) { S.picked.add(gs[0].lead.thread); S.anchor = S.sel; render(); }
+  if (pickedSet().size < 2) {
+    if (!pickedSet().size && gs[0]) { S.anchor = gs[0].lead.thread; render(); }
     toast("Shift+j / Shift+k to add rows, then c to combine");
     return;
   }
@@ -378,14 +393,15 @@ document.addEventListener("click", e => {
   if (b) {
     S.sel = +b.closest(".row").dataset.i;
     ({open: openSel, done: () => act("done"), snooze: snoozeMenu, imp: () => teach("needs-you"), noise: () => teach("noise"),
-      fix: fixLink, pick: () => { pick(S.sel); S.anchor = S.sel; render(); }, combine, mute})[b.dataset.a]();
+      fix: fixLink, pick: () => { pick(S.sel); render(); }, combine, mute})[b.dataset.a]();
     return;
   }
   const r = e.target.closest(".row");
   if (r) {
     const i = +r.dataset.i;
-    if (e.shiftKey) { pickRange(S.anchor === null ? S.sel : S.anchor, i); S.anchor = S.anchor === null ? S.sel : S.anchor; }
-    else if (e.metaKey || e.ctrlKey) { pick(i); S.anchor = i; }
+    if (e.shiftKey) { if (S.anchor === null && groups()[S.sel]) S.anchor = groups()[S.sel].lead.thread; }
+    else if (e.metaKey || e.ctrlKey) { pick(i); }
+    else commitRange();
     S.sel = i; render();
   }
 });
@@ -412,13 +428,19 @@ document.addEventListener("keydown", e => {
   if ($("#drawer").classList.contains("show")) { if (e.key === "Escape" || e.key === "?") drawer(false); return; }
   const n = groups().length;
   if (S.asked !== null && (e.key === "y" || e.key === "n")) { e.preventDefault(); if (e.key === "y") { S.asked = null; render(); toast("Good"); } else fixLink(); return; }
+  if (e.shiftKey && ["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+    e.preventDefault();
+    const step = {ArrowDown: 1, ArrowUp: -1, Home: -n, End: n}[e.key];
+    extend(step, n); S.asked = null; render(); return;
+  }
   switch (e.key) {
-    case "j": case "ArrowDown": S.sel = Math.min(n - 1, S.sel + 1); S.asked = null; render(); break;
-    case "k": case "ArrowUp": S.sel = Math.max(0, S.sel - 1); S.asked = null; render(); break;
-    case "J": pick(S.sel, true); S.sel = Math.min(n - 1, S.sel + 1); pick(S.sel, true); S.asked = null; render(); break;
-    case "K": pick(S.sel, true); S.sel = Math.max(0, S.sel - 1); pick(S.sel, true); S.asked = null; render(); break;
-    case "x": pick(S.sel); S.anchor = S.sel; render(); break;
-    case "Escape": if (S.picked.size) { clearPicks(); render(); } break;
+    case "Home": case "End": e.preventDefault(); commitRange(); S.sel = e.key === "Home" ? 0 : n - 1; render(); break;
+    case "j": case "ArrowDown": commitRange(); S.sel = Math.min(n - 1, S.sel + 1); S.asked = null; render(); break;
+    case "k": case "ArrowUp": commitRange(); S.sel = Math.max(0, S.sel - 1); S.asked = null; render(); break;
+    case "J": extend(1, n); S.asked = null; render(); break;
+    case "K": extend(-1, n); S.asked = null; render(); break;
+    case "x": pick(S.sel); render(); break;
+    case "Escape": if (pickedSet().size) { clearPicks(); render(); } break;
     case "o": openSel(); break;
     case "Enter": if (e.target.tagName !== "BUTTON") openSel(); break;
     case "e": act("done"); break;

@@ -45,10 +45,10 @@ That adds Messages conversations where they spoke last and you never replied, op
 |---|---|---|---|
 | `j` `k` move | `o` / Enter open | `e` done | `s` snooze (hour, tonight, tomorrow, next week) |
 | `+` always important | `-` not important | `f` fix where it opens | `c` combine rows into one conversation, `C` split |
-| `x` select, `Shift`+`j`/`k` extend | `m` mute this app | `/` filter | `z` undo (again and again), `Shift`+`Z` redo |
+| `x` select, `Shift`+`j`/`k` (or arrows, Home, End) extend, Esc clears | `m` mute this app | `/` filter | `z` undo (again and again), `Shift`+`Z` redo |
 | `?` what it's learned | `p` screen-share mode | `0`-`9` filter by source | `r` collect now |
 
-With rows selected (`x`, `Shift`+`j`/`k`, Shift-click, Cmd/Ctrl-click), `e`, `s`, `+`, `-`, `m` and `c` act on all of them at once, as one step that one `z` undoes. Undo is a stack kept in the database, so it goes all the way back, even after a restart. Every action also has a button on the row, so a mouse or a touchscreen works too.
+Selecting works like Gmail or vim's visual mode: the first `Shift`+`j`/`k` (or Shift+arrow, Shift-click) drops an anchor, and the selection runs from the anchor to the cursor, so moving back shrinks it. `x` and Cmd/Ctrl-click add or remove single rows. With rows selected, `e`, `s`, `+`, `-`, `m` and `c` act on all of them at once, as one step that one `z` undoes. Undo is a stack kept in the database, so it goes all the way back, even after a restart. Every action also has a button on the row, so a mouse or a touchscreen works too.
 
 Items from the same conversation group into one row (pile uses the thread id apps attach to their notifications, so a group text is one row); select it to see the earlier messages, and `e` clears the whole row. If several rows are really one conversation, select them and press `c`: they fold into the newest one, and pile remembers it.
 
