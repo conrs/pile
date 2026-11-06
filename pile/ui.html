@@ -86,6 +86,12 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
 .rule .v{font:12px ui-monospace,Menlo,monospace;color:var(--dim);word-break:break-all;margin-top:2px}
 .rule button{color:var(--faint);font-size:16px;padding:0 4px}
 .rule button:hover{color:#ff7a7a}
+/* Screen-share mode (p): blur who and what, keep the shape of the inbox. */
+body.private .who,body.private .l2,body.private .av,body.private .card code,body.private .card b,body.private #fixurl,
+body.private .rule .v,body.private .rule b,body.private .learned{filter:blur(9px)}
+body.private.keep-github .row.src-github .who,body.private.keep-github .row.src-github .av{filter:none}
+.privbadge{display:none;font-size:11px;font-weight:700;color:var(--accent-ink);background:var(--accent);border-radius:6px;padding:2px 7px}
+body.private .privbadge{display:inline-block}
 @media (max-width:560px){.keys{display:none}.app{display:none}}
 </style>
 </head>
@@ -97,6 +103,7 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
       pile
     </div>
     <div class="count" id="count"></div>
+    <span class="privbadge" title="Screen-share mode: names and messages are blurred (p)">private</span>
     <div class="spacer"></div>
     <button class="pill" id="learnedBtn" title="What pile has learned (?)">Learned <span class="n" id="nrules">0</span></button>
     <button class="pill" id="refreshBtn" title="Collect now (r)">Refresh</button>
@@ -110,7 +117,7 @@ header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
   <span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>o</kbd> open</span><span><kbd>e</kbd> done</span>
   <span><kbd>s</kbd> snooze</span><span><kbd>/</kbd> filter</span><span><kbd>!</kbd> important</span>
   <span><kbd>-</kbd> not important</span><span><kbd>l</kbd> fix link</span><span><kbd>m</kbd> mute app</span>
-  <span><kbd>u</kbd> undo</span><span><kbd>?</kbd> learned</span>
+  <span><kbd>u</kbd> undo</span><span><kbd>?</kbd> learned</span><span><kbd>p</kbd> screen-share mode</span>
 </div></div>
 <div class="toast" id="toast"></div>
 <div class="pop" id="pop"><div class="card" id="popcard"></div></div>
@@ -185,7 +192,7 @@ function render(){
   $("#list").innerHTML = `<div class="list">` + gs.map((g, i) => {
     const it = g.lead, name = it.sender || it.app_name;
     const ask = S.asked === it.id ? `<div class="ask">Did that land in the right place? <button data-act="yes"><kbd>y</kbd> Yes</button><button data-act="no"><kbd>n</kbd> No, fix it</button></div>` : "";
-    return `<div class="row ${i === S.sel ? "sel" : ""} ${it.label === "noise" ? "noiserow" : ""}" data-i="${i}">
+    return `<div class="row src-${esc(it.source)} ${i === S.sel ? "sel" : ""} ${it.label === "noise" ? "noiserow" : ""}" data-i="${i}">
       <div class="av" style="background:${color(it.app_name)}">${esc(it.app_name[0] || "?")}</div>
       <div class="main"><div class="l1"><span class="who">${esc(name)}</span><span class="app">${esc(it.app_name)}</span>
         ${it.label ? `<span class="chip ${esc(it.label)}">${esc(it.label)}</span>` : ""}
@@ -237,7 +244,7 @@ function fixLink(){
   $("#fixurl").onkeydown = async e => {
     if (e.key === "Enter" && e.target.value.trim()) {
       e.preventDefault();
-      try { const r = await api("/api/fix_link", {id: it.id, url: e.target.value.trim()}); closeModal(); S.asked = null; toast("Learned for " + r.scope); await loadRules(); await load(); }
+      try { const r = await api("/api/fix_link", {id: it.id, url: e.target.value.trim()}); closeModal(); S.asked = null; toast(isPrivate() && !/^every /.test(r.scope) ? "Learned for this thread" : "Learned for " + r.scope); await loadRules(); await load(); }
       catch (err) { toast("Couldn't learn that: " + err.message); }
     }
     if (e.key === "Escape") closeModal();
@@ -246,7 +253,7 @@ function fixLink(){
 async function teach(label){
   const g = current(); if (!g) return;
   const r = await api("/api/label", {id: g.lead.id, label});
-  toast((label === "noise" ? "Not important: " : "Always important: ") + (r.rule.note || "this sender"));
+  toast((label === "noise" ? "Not important: " : "Always important: ") + (isPrivate() ? "this sender" : (r.rule.note || "this sender")));
   await loadRules(); await load();
 }
 function mute(){
@@ -321,6 +328,7 @@ document.addEventListener("keydown", e => {
     case "m": mute(); break;
     case "?": drawer(true); break;
     case "r": $("#refreshBtn").click(); break;
+    case "p": setPrivate(!isPrivate()); toast(isPrivate() ? "Screen-share mode: names and messages blurred" : "Screen-share mode off"); break;
     case "i": S.view = "new"; S.sel = 0; load(); break;
     case "u": if (S.undo) { const u = S.undo; S.undo = null; api(u.view === "new" ? "/api/reopen" : "/api/done", {ids: u.ids}).then(() => { toast("Undone"); load(); }); } break;
     default:
@@ -331,6 +339,19 @@ document.addEventListener("keydown", e => {
   }
 });
 
+// Screen-share mode: ?private (add &keep=github to leave public repo names readable), or press p.
+function isPrivate(){ return document.body.classList.contains("private"); }
+function setPrivate(on){
+  document.body.classList.toggle("private", on);
+  try { localStorage.setItem("pile.private", on ? "1" : ""); } catch (e) {}
+}
+(function(){
+  const q = new URLSearchParams(location.search);
+  let on = q.has("private");
+  try { on = on || localStorage.getItem("pile.private") === "1"; } catch (e) {}
+  setPrivate(on);
+  if (q.get("keep") === "github") document.body.classList.add("keep-github");
+})();
 load(); loadRules();
 setInterval(() => { if (!$("#pop").classList.contains("show") && document.visibilityState === "visible") load(); }, 15000);
 </script>

@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 REPO=$PWD
-WORK=$(mktemp -d)
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/pile-rec.XXXX")
 D=:98
 PORT=${PORT:-8791}
 FONT=${FONT:-$(fc-match -f '%{file}' 'Adwaita Sans:semibold')}
@@ -71,6 +71,9 @@ stop
 go "file://$REPO/docs/media/terminal.html#agent"; sleep 0.3
 rec "$WORK/3.mkv"; sleep 21; stop
 
+if [ -n "${KEEP_RAW:-}" ]; then  # uncaptioned footage, e.g. for narrate.py
+  mkdir -p "$KEEP_RAW"; cp "$WORK"/1.mkv "$WORK"/2.mkv "$WORK"/3.mkv "$WORK/marks" "$KEEP_RAW"/
+fi
 m() { awk -v n="$1" '$1==n{print $2}' "$WORK/marks"; }
 FEED=$(m feed); OPEN=$(m open); FIX=$(m fix); HERO=$(m hero); END=$(m end)
 
