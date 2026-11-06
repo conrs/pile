@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from . import deeplinks
 
-KINDS = ("link", "label", "mute")
+KINDS = ("link", "label", "mute", "group")
 LABELS = ("needs-you", "fyi", "noise")
 PLACEHOLDER_FIELDS = ("sender", "title", "ext_id")
 _PH = re.compile(r"\{(sender|title|ext_id)(?::(q|slug))?\}")
@@ -88,6 +88,8 @@ def add(store, kind: str, value: str = "", app: Optional[str] = None, sender: Op
         raise ValueError("label must be one of " + ", ".join(LABELS))
     if kind == "mute" and not app:
         raise ValueError("mute needs an app")
+    if kind == "group" and not (sender and value):
+        raise ValueError("group needs match.sender (the thread to fold in) and value (the thread it joins)")
     # One rule per (kind, app, sender): a new answer replaces the old one.
     store.db.execute("DELETE FROM rules WHERE kind=? AND app IS ? AND sender IS ?", (kind, app, sender))
     cur = store.db.execute("INSERT INTO rules(kind, app, sender, value, note, created) VALUES(?,?,?,?,?,?)",
@@ -132,6 +134,18 @@ def _matching(store, kind: str, item: dict) -> list:
         " ORDER BY (sender IS NOT NULL) DESC, (app IS NOT NULL) DESC, created DESC, id DESC",
         (kind, item.get("app"), item.get("sender") or "", item.get("thread") or ""))
     return [dict(r) for r in rows]
+
+
+def thread_for(store, item: dict) -> str:
+    """The item's conversation after learned groupings (followed a few hops)."""
+    thread = item.get("thread") or ""
+    for _ in range(4):
+        row = store.db.execute("SELECT value FROM rules WHERE kind='group' AND (app IS NULL OR app=?) AND sender=?"
+                               " ORDER BY id DESC LIMIT 1", (item.get("app"), thread)).fetchone()
+        if not row or row["value"] == thread:
+            break
+        thread = row["value"]
+    return thread
 
 
 def learn_link(store, item: dict, pasted: str) -> dict:

@@ -116,3 +116,48 @@ def collect(store, **_) -> int:
             conn.logout()
         except Exception:
             pass
+
+
+BULK = re.compile(r"(no-?reply|do-?not-?reply|notifications?@|mailer-daemon|bounce)", re.I)
+
+
+def is_person(msg) -> bool:
+    """Real people, not lists, receipts or robots."""
+    if msg.get("List-Unsubscribe") or msg.get("List-Id"):
+        return False
+    if (msg.get("Precedence") or "").lower() in ("bulk", "list", "junk"):
+        return False
+    if (msg.get("Auto-Submitted") or "no").lower() != "no":
+        return False
+    return not BULK.search(msg.get("From") or "")
+
+
+def backfill(store, days: float = 30, **_) -> int:
+    """Mail from people in the last N days that you never answered (no \\Answered flag)."""
+    if not available():
+        return 0
+    import time as _time
+    host = os.environ.get("PILE_IMAP_HOST", "imap.gmail.com")
+    user = os.environ["PILE_IMAP_USER"]
+    since = _time.strftime("%d-%b-%Y", _time.localtime(_time.time() - days * 86400))
+    conn = imaplib.IMAP4_SSL(host)
+    try:
+        conn.login(user, os.environ["PILE_IMAP_PASSWORD"])
+        conn.select(os.environ.get("PILE_IMAP_FOLDER", "INBOX"), readonly=True)
+        _, data = conn.search(None, "SINCE", since, "UNANSWERED", "NOT", "FROM", '"%s"' % user)
+        n = 0
+        for num in (data[0] or b"").split()[-200:]:
+            _, parts = conn.fetch(num, "(BODY.PEEK[])")
+            raw = next((p[1] for p in parts if isinstance(p, tuple)), None)
+            if not raw or not is_person(email.message_from_bytes(raw)):
+                continue
+            item = to_item(raw, host)
+            item["tag"] = "unanswered"
+            if store.upsert(item):
+                n += 1
+        return n
+    finally:
+        try:
+            conn.logout()
+        except Exception:
+            pass

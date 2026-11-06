@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from typing import Optional
@@ -116,3 +117,54 @@ def collect(store, notifications: Optional[list] = None, **_) -> int:
             return 0
         notifications = fetch(tok)
     return ingest(store, notifications)
+
+
+def _get(tok: str, url: str):
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + tok, "Accept": "application/vnd.github+json",
+                                               "User-Agent": "pile"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode())
+
+
+def search_item(it: dict, why: str) -> dict:
+    from calendar import timegm
+    repo = "/".join((it.get("repository_url") or "").split("/")[-2:])
+    at = datetime.strptime(it["updated_at"], "%Y-%m-%dT%H:%M:%SZ")
+    return {"source": NAME, "ext_id": "search:%s" % it["id"], "app": "github", "app_name": "GitHub",
+            "thread": "github|search:%s" % it["id"], "sender": repo, "title": it.get("title") or "",
+            "body": why, "at": float(timegm(at.timetuple())), "url": it.get("html_url") or "", "tag": "unanswered"}
+
+
+def backfill(store, days: float = 30, notifications=None, searches=None, **_) -> int:
+    """Older notifications (read ones too), plus open review requests and assigned issues."""
+    tok = None
+    if notifications is None or searches is None:
+        tok = token()
+        if not tok:
+            return 0
+    import time as _time
+    since = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(_time.time() - days * 86400))
+    if notifications is None:
+        notifications, url = [], API + "/notifications?all=true&per_page=50&since=" + since
+        for page in range(1, 6):
+            batch = _get(tok, url + "&page=%d" % page)
+            notifications += batch
+            if len(batch) < 50:
+                break
+    if searches is None:
+        searches = []
+        for q, why in (("is:open is:pr review-requested:@me", "review requested from you"),
+                       ("is:open is:issue assignee:@me", "assigned to you")):
+            res = _get(tok, API + "/search/issues?per_page=50&q=" + urllib.parse.quote(q))
+            searches += [(it, why) for it in res.get("items", [])]
+    n = 0
+    for note in notifications:
+        item = to_item(note)
+        if not note.get("unread", True):
+            item["tag"] = "earlier"
+        if store.upsert(item):
+            n += 1
+    for it, why in searches:
+        if store.upsert(search_item(it, why)):
+            n += 1
+    return n

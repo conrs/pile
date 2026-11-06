@@ -17,6 +17,7 @@ TOOLS = [
          "source": {"type": "string", "description": "macos, github or imap"},
          "state": {"type": "string", "enum": ["new", "snoozed", "done", "all"], "default": "new"},
          "label": {"type": "string", "enum": list(rules.LABELS)},
+         "tag": {"type": "string", "description": "e.g. unanswered (from pile backfill), oldest first"},
          "limit": {"type": "integer", "default": 50}}}},
     {"name": "get_item", "description": "One item in full.",
      "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}},
@@ -32,12 +33,15 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "url": {"type": "string"}},
                      "required": ["id", "url"]}},
     {"name": "set_rule", "description": "Teach pile a rule. kind=label with value needs-you|fyi|noise; kind=mute "
-     "(skip an app entirely); kind=link with a template like https://example.com/{sender:slug}. match.app is a "
+     "(skip an app entirely); kind=link with a template like https://example.com/{sender:slug}; kind=group with "
+     "match.sender = a thread key to fold in and value = the thread key it joins (thread keys are in list_inbox). match.app is a "
      "bundle id/app key from list_inbox (omit for any app); match.sender narrows to one sender/thread.",
      "inputSchema": {"type": "object", "properties": {
          "kind": {"type": "string", "enum": list(rules.KINDS)},
          "match": {"type": "object", "properties": {"app": {"type": "string"}, "sender": {"type": "string"}}},
          "value": {"type": "string"}}, "required": ["kind"]}},
+    {"name": "history", "description": "What the user did recently (open, done, snooze, label, mute, fix_link, group), newest first.",
+     "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 50}}}},
     {"name": "list_rules", "description": "Everything pile has learned (link fixes, labels, muted apps).",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "delete_rule", "description": "Forget a learned rule.",
@@ -46,7 +50,10 @@ TOOLS = [
 
 
 def _brief(item: dict) -> dict:
-    out = {k: item[k] for k in ("id", "source", "app", "app_name", "sender", "title", "body", "state", "label", "link")}
+    out = {k: item[k] for k in ("id", "source", "app", "app_name", "thread", "sender", "title", "body", "state",
+                                "label", "link")}
+    if item.get("tag"):
+        out["tag"] = item["tag"]
     out["when"] = datetime.fromtimestamp(item["at"]).isoformat(timespec="minutes")
     if item["link_learned"]:
         out["link_learned"] = True
@@ -57,7 +64,9 @@ def _brief(item: dict) -> dict:
 
 def call(store, name: str, a: dict):
     if name == "list_inbox":
-        items = store.items(a.get("state", "new"), a.get("source"), a.get("label"), int(a.get("limit", 50)))
+        items = store.items(a.get("state", "new"), a.get("source"), a.get("label"), 2000 if a.get("tag") else int(a.get("limit", 50)))
+        if a.get("tag"):
+            items = sorted([i for i in items if i.get("tag") == a["tag"]], key=lambda i: i["at"])[:int(a.get("limit", 50))]
         return {"count": len(items), "stats": store.stats(), "items": [_brief(i) for i in items]}
     if name == "get_item":
         item = store.get(a["id"])
@@ -76,6 +85,8 @@ def call(store, name: str, a: dict):
         m = a.get("match") or {}
         return rules.add(store, a["kind"], a.get("value", ""), app=m.get("app"), sender=m.get("sender"),
                          note="set by agent")
+    if name == "history":
+        return {"actions": store.history(int(a.get("limit", 50)))}
     if name == "list_rules":
         return {"rules": rules.all_rules(store)}
     if name == "delete_rule":

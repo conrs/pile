@@ -67,13 +67,15 @@ def parse_record(rec_id: int, identifier: Optional[str], data: bytes, delivered:
     at = float(when) + MAC_EPOCH if isinstance(when, (int, float)) else 0.0
     # Messages/Slack/Discord put the person or channel in the title, the message in the body.
     sender = title
+    # The conversation id when the app sets one (Messages, Slack, Mail threads), else the title.
+    tid = next((req.get(k) for k in ("thre", "thread", "srce") if isinstance(req.get(k), str) and req.get(k)), "")
     head = " · ".join(x for x in (title, subt) if x)
     return {
         "source": NAME,
         "ext_id": str(pl.get("uuid") or rec_id) if not isinstance(pl.get("uuid"), bytes) else pl["uuid"].hex(),
         "app": app,
         "app_name": deeplinks.app_name(app),
-        "thread": app + "|" + (title or subt or "?"),
+        "thread": app + "|t:" + tid if tid else app + "|" + (title or subt or "?"),
         "sender": sender,
         "title": subt if subt and subt != title else "",
         "body": body or head,

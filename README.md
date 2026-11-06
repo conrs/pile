@@ -27,6 +27,14 @@ python3 -m pile collect && python3 -m pile serve
 
 Just looking? `python3 -m pile serve --demo` runs on made-up data in a separate database.
 
+macOS deletes notifications once you dismiss them, so pile can only see what's still in Notification Center (it keeps its own copy from then on). For the older stuff you never followed up on:
+
+```sh
+python3 -m pile backfill --days 30
+```
+
+That adds Messages conversations where they spoke last and you never replied, open GitHub review requests and assigned issues (plus older notifications), and mail from real people you never answered (lists and no-reply senders skipped). They get an "unanswered" chip and their own Unanswered tab, oldest first.
+
 [Setup video (75 s)](docs/setup.mp4)
 
 ## Keys
@@ -36,14 +44,20 @@ Just looking? `python3 -m pile serve --demo` runs on made-up data in a separate 
 | `j` `k` move | `o` open the thread | `e` done | `s` snooze (hour, tonight, tomorrow, next week) |
 | `/` filter | `!` always important from them | `-` not important | `l` fix where it opens |
 | `m` mute this app | `u` undo | `?` what it's learned | `0`-`9` filter by source |
+| `g` same conversation as... | `G` ungroup | `p` screen-share mode | `r` collect now |
 
-Items from the same person, channel or PR group into one row; `e` clears the whole row.
+Items from the same conversation group into one row (pile uses the thread id apps attach to their notifications, so a group text is one row); select it to see the earlier messages, and `e` clears the whole row. If two rows are really one conversation, `g` folds one into the other and pile remembers it.
+
+**Screen-share mode** (`p`, or open `/?private`) blurs every name, message and avatar so you can demo or stream your real inbox. `/?private&keep=github` leaves repo names readable.
+
+**History:** `pile history` lists what you did (open, done, snooze, labels, link fixes), newest first, `--json` for scripts. `pile reopen --since 2h` (or `--all`, `--source github`) puts cleared items back. `pile list --state done` shows what you cleared.
 
 ## Platforms
 
 | Collector | Runs on | What it reads | Needs |
 |---|---|---|---|
 | `macos` | macOS | Notification Center database (every app and website that notifies you) | Full Disk Access for your terminal |
+| `messages` | macOS | `chat.db`: conversations waiting on your reply (`pile backfill`) | Full Disk Access for your terminal |
 | `windows` | Windows | `%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db` | nothing (it's your own file); install Python from python.org |
 | `linux` | Linux | desktop notifications, live, via `dbus-monitor` | a desktop session; runs while `watch` or `serve` runs |
 | `github` | any | GitHub notifications | `GITHUB_TOKEN`, or the `gh` CLI logged in |
@@ -105,7 +119,7 @@ Claude Desktop (`claude_desktop_config.json`):
 
 Then ask "which three of these matter?" or "snooze everything from GitHub until tomorrow".
 
-Tools: `list_inbox {source?, state?, label?, limit?}`, `get_item {id}`, `mark_done {ids}`, `snooze {ids, until}`, `open_item {id}`, and for teaching it: `fix_link {id, url}`, `set_rule {kind, match, value}`, `list_rules`, `delete_rule {id}`.
+Tools: `list_inbox {source?, state?, label?, tag?, limit?}`, `history {limit?}`, `get_item {id}`, `mark_done {ids}`, `snooze {ids, until}`, `open_item {id}`, and for teaching it: `fix_link {id, url}`, `set_rule {kind, match, value}`, `list_rules`, `delete_rule {id}`.
 
 ## It learns from you
 
@@ -158,7 +172,7 @@ def collect(store, **opts):
     return n
 ```
 
-Push-style sources (a socket, a D-Bus stream) define `listen(store, stop, **opts)` instead of `collect`. To teach pile a new app's deep link, add a line to `APPS` in `pile/deeplinks.py`.
+Push-style sources (a socket, a D-Bus stream) define `listen(store, stop, **opts)` instead of `collect`. Sources with history can also define `backfill(store, days, **opts)` for `pile backfill`. To teach pile a new app's deep link, add a line to `APPS` in `pile/deeplinks.py`.
 
 ## Tests
 

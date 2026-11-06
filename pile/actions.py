@@ -31,14 +31,17 @@ def parse_until(until: Union[str, int, float], now: float = None) -> float:
 def snooze(store, ids, until) -> dict:
     t = parse_until(until)
     n = store.set_state(ids, "snoozed", t)
+    store.log("snooze", ids, until=t)
     return {"snoozed": n, "until": datetime.fromtimestamp(t).isoformat(timespec="minutes")}
 
 
 def done(store, ids) -> dict:
+    store.log("done", ids)
     return {"done": store.set_state(ids, "done")}
 
 
 def reopen(store, ids) -> dict:
+    store.log("reopen", ids)
     return {"reopened": store.set_state(ids, "new")}
 
 
@@ -47,6 +50,7 @@ def open_item(store, item_id) -> dict:
     if not item:
         raise KeyError("no item %s" % item_id)
     did = deeplinks.open_link(item["link"])
+    store.log("open", [item["id"]], link=item["link"], learned=item["link_learned"])
     return {"id": item["id"], "link": item["link"], "learned": item["link_learned"], "result": did}
 
 
@@ -55,6 +59,7 @@ def fix_link(store, item_id, url) -> dict:
     if not item:
         raise KeyError("no item %s" % item_id)
     rule = rules.learn_link(store, item, url)
+    store.log("fix_link", [item["id"]], url=url, template=rule["value"], generic=rule["sender"] is None)
     fields = sorted(set(re.findall(r"\{(\w+)", rule["value"])))
     scope = ("every %s item, filling in the %s" % (item["app_name"], " and ".join(f.replace("ext_id", "id") for f in fields))
              if rule["sender"] is None else "%s in %s" % (item["sender"] or item["title"], item["app_name"]))
@@ -67,6 +72,7 @@ def teach_label(store, item_id, label, scope="sender") -> dict:
     if not item:
         raise KeyError("no item %s" % item_id)
     sender = None if scope == "app" else (item["thread"] or item["sender"])
+    store.log("label", [item["id"]], label=label, scope=scope)
     return {"rule": rules.add(store, "label", label, app=item["app"], sender=sender,
                               note=(item["sender"] or item["title"]) if sender else item["app_name"])}
 
@@ -75,4 +81,29 @@ def mute_app(store, item_id) -> dict:
     item = store.get(item_id)
     if not item:
         raise KeyError("no item %s" % item_id)
+    store.log("mute", [item["id"]], app=item["app"])
     return {"rule": rules.add(store, "mute", app=item["app"], note=item["app_name"])}
+
+
+def group(store, item_id, with_id) -> dict:
+    """Teach pile that two rows are one conversation: `with_id`'s thread joins `item_id`'s."""
+    a, b = store.get(item_id), store.get(with_id)
+    if not a or not b:
+        raise KeyError("no such item")
+    if a["thread"] == b["thread"]:
+        return {"rule": None, "thread": a["thread"]}
+    store.log("group", [item_id, with_id])
+    rule = rules.add(store, "group", a["thread"], app=b["app"], sender=b["thread"],
+                     note="%s + %s" % (a["sender"] or a["title"], b["sender"] or b["title"]))
+    return {"rule": rule, "thread": a["thread"]}
+
+
+def ungroup(store, item_id) -> dict:
+    """Forget every learned grouping into this item's thread."""
+    item = store.get(item_id)
+    if not item:
+        raise KeyError("no item %s" % item_id)
+    n = store.db.execute("DELETE FROM rules WHERE kind='group' AND (value=? OR sender=?)",
+                         (item["thread"], item.get("raw_thread") or item["thread"])).rowcount
+    store.log("ungroup", [item_id])
+    return {"forgot": n}

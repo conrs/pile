@@ -10,6 +10,10 @@ A collector module defines:
     def check(**opts) -> (bool, str):  # ready?  and "ok" / "missing X: how to enable"
     def collect(store, **opts) -> int: # poll once; store.upsert(item) per thing; return how many
 
+optionally, for `pile backfill` (older things you never followed up on):
+
+    def backfill(store, days, **opts) -> int:
+
 or, for sources that push (like a D-Bus stream), instead of collect:
 
     def listen(store, stop, **opts):   # block until stop (a threading.Event) is set
@@ -93,6 +97,21 @@ def run_all(store, quiet=False, **opts) -> dict:
         try:
             counts[mod.NAME] = mod.collect(store, **opts)
         except Exception as e:  # one broken source never stops the others
+            counts[mod.NAME] = "error: %s" % e
+            if not quiet:
+                print("pile: %s: %s" % (mod.NAME, e), file=sys.stderr)
+    return counts
+
+
+def run_backfill(store, days=30, quiet=False, **opts) -> dict:
+    """Older, never-followed-up items from collectors that define backfill(store, days, **opts)."""
+    counts = {}
+    for mod in ready(opts):
+        if not hasattr(mod, "backfill"):
+            continue
+        try:
+            counts[mod.NAME] = mod.backfill(store, days, **opts)
+        except Exception as e:
             counts[mod.NAME] = "error: %s" % e
             if not quiet:
                 print("pile: %s: %s" % (mod.NAME, e), file=sys.stderr)

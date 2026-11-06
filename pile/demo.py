@@ -28,20 +28,26 @@ ITEMS = [
     (130, "gmail", "The Weekly Byte", "Issue #212: the browser is the OS now", "This week: local-first apps, sqlite everywhere, and more", "https://mail.google.com/mail/u/0/#search/rfc822msgid:demo-3%40mail.example.com", "noise"),
     (180, "com.hnc.Discord", "Server Boosts", "", "Your server reached Level 2!", None, "noise"),
     (240, "github", "acme/docs", "Bump lodash from 4.17.20 to 4.17.21", "PullRequest · subscribed", "https://github.com/acme/docs/pull/33", "noise"),
+    # From `pile backfill`: they spoke last, you never replied.
+    (60 * 27, "com.apple.MobileSMS", "Chris", "", "did you get a chance to look at the lease?", "sms:+15550100", "needs-you", "unanswered"),
+    (60 * 24 * 4, "gmail", "Robin Park", "Intro: Robin <> you", "Happy to connect! Does next week work for a quick call?", "https://mail.google.com/mail/u/0/#search/rfc822msgid:demo-4%40mail.example.com", "needs-you", "unanswered"),
+    (60 * 24 * 9, "github", "acme/infra", "Move CI to the new runners (#58)", "review requested from you", "https://github.com/acme/infra/pull/58", "needs-you", "unanswered"),
 ]
 
 
 def seed(store, now=None) -> int:
     now = now or time.time()
     n = 0
-    for i, (ago, app, sender, title, body, url, label) in enumerate(ITEMS):
+    for i, row in enumerate(ITEMS):
+        ago, app, sender, title, body, url, label = row[:7]
+        tag = row[7] if len(row) > 7 else None
         source = {"github": "github", "gmail": "imap"}.get(app, "macos")
         key = title if title.startswith("#") or sender == deeplinks.app_name(app) else sender
         thread = "github|demo%d" % i if app == "github" else app + "|" + key
         if store.upsert({
             "source": source, "ext_id": "demo-%d" % i, "app": app, "app_name": deeplinks.app_name(app),
             "thread": thread, "sender": sender, "title": title, "body": body, "at": now - ago * M,
-            "url": url or deeplinks.default_link(app), "label": label, "label_by": "demo",
+            "url": url or deeplinks.default_link(app), "label": label, "label_by": "demo", "tag": tag,
         }):
             n += 1
     return n

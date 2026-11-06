@@ -26,6 +26,13 @@ CREATE TABLE IF NOT EXISTS items (
   UNIQUE (source, ext_id)
 );
 CREATE INDEX IF NOT EXISTS items_state_at ON items (state, at DESC);
+CREATE TABLE IF NOT EXISTS actions (
+  id INTEGER PRIMARY KEY,
+  at REAL NOT NULL,
+  action TEXT NOT NULL,          -- open | done | reopen | snooze | label | mute | fix_link | group | ...
+  item_id INTEGER,
+  detail TEXT NOT NULL DEFAULT '{}'
+);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS rules (
   id INTEGER PRIMARY KEY,
@@ -39,7 +46,7 @@ CREATE TABLE IF NOT EXISTS rules (
 """
 
 FIELDS = ("id", "source", "ext_id", "app", "app_name", "thread", "sender", "title",
-          "body", "at", "url", "state", "snooze_until", "label", "label_by")
+          "body", "at", "url", "state", "snooze_until", "label", "label_by", "tag", "changed_at")
 
 
 def default_path() -> str:
@@ -56,6 +63,10 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(items)")}
+        for col, decl in (("tag", "TEXT"), ("changed_at", "REAL")):  # added after 0.1.0
+            if col not in cols:
+                self.db.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
 
     # ---- meta (watermarks) ----
     def get_meta(self, key: str, default: Optional[str] = None) -> Optional[str]:
@@ -85,16 +96,19 @@ class Store:
                 + (", state='new', snooze_until=NULL" if reopen else "") + " WHERE id=?",
                 (item["app"], item["app_name"], item["thread"], item["sender"], item["title"],
                  item["body"], item["at"], item["url"], old["id"]))
+            if item.get("tag"):
+                self.db.execute("UPDATE items SET tag=? WHERE id=?", (item["tag"], old["id"]))
             return old["id"]
         label, label_by = item.get("label"), item.get("label_by")
         if not label:
             label = rules.label_for(self, item)
             label_by = "rule" if label else None
         cur = self.db.execute(
-            "INSERT INTO items(source, ext_id, app, app_name, thread, sender, title, body, at, url, state, label, label_by)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO items(source, ext_id, app, app_name, thread, sender, title, body, at, url, state, label, label_by, tag)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (item["source"], item["ext_id"], item["app"], item["app_name"], item["thread"], item["sender"],
-             item["title"], item["body"], item["at"], item["url"], item.get("state", "new"), label, label_by))
+             item["title"], item["body"], item["at"], item["url"], item.get("state", "new"), label, label_by,
+             item.get("tag")))
         return cur.lastrowid
 
     def _wake_snoozed(self) -> None:
@@ -120,6 +134,8 @@ class Store:
 
     def present(self, item: dict) -> dict:
         from . import rules
+        item["raw_thread"] = item["thread"]
+        item["thread"] = rules.thread_for(self, item)
         link, learned = rules.resolve_link(self, item)
         item["link"], item["link_learned"] = link, learned
         return item
@@ -129,8 +145,8 @@ class Store:
         if not ids:
             return 0
         marks = ",".join("?" * len(ids))
-        cur = self.db.execute(f"UPDATE items SET state=?, snooze_until=? WHERE id IN ({marks})",
-                              [state, snooze_until] + ids)
+        cur = self.db.execute(f"UPDATE items SET state=?, snooze_until=?, changed_at=? WHERE id IN ({marks})",
+                              [state, snooze_until, time.time()] + ids)
         return cur.rowcount
 
     def set_label(self, item_id: int, label: Optional[str], by: str) -> None:
@@ -140,8 +156,35 @@ class Store:
         """Mark done the open items a source no longer reports (read elsewhere)."""
         live = set(live_ext_ids)
         gone = [r["id"] for r in self.db.execute(
-            "SELECT id, ext_id FROM items WHERE source=? AND state!='done'", (source,)) if r["ext_id"] not in live]
+            "SELECT id, ext_id FROM items WHERE source=? AND state!='done' AND tag IS NULL", (source,))
+            if r["ext_id"] not in live]
         return self.set_state(gone, "done")
+
+    def log(self, action: str, item_ids=(None,), **detail) -> None:
+        import json
+        now = time.time()
+        for i in (item_ids or (None,)):
+            self.db.execute("INSERT INTO actions(at, action, item_id, detail) VALUES(?,?,?,?)",
+                            (now, action, i, json.dumps(detail, ensure_ascii=False)))
+
+    def history(self, limit: int = 200) -> list:
+        import json
+        out = []
+        for r in self.db.execute("SELECT a.*, i.app_name, i.sender, i.title FROM actions a LEFT JOIN items i"
+                                 " ON i.id = a.item_id ORDER BY a.at DESC, a.id DESC LIMIT ?", (int(limit),)):
+            r = dict(r)
+            r["detail"] = json.loads(r["detail"] or "{}")
+            out.append(r)
+        return out
+
+    def reopen(self, since: Optional[float] = None, source: Optional[str] = None) -> int:
+        """Put done/snoozed items back in the inbox. Rules are kept."""
+        q, args = "UPDATE items SET state='new', snooze_until=NULL, changed_at=? WHERE state!='new'", [time.time()]
+        if since is not None:
+            q += " AND changed_at >= ?"; args.append(since)
+        if source:
+            q += " AND source=?"; args.append(source)
+        return self.db.execute(q, args).rowcount
 
     def stats(self) -> dict:
         self._wake_snoozed()
@@ -152,6 +195,8 @@ class Store:
             out["sources"][r["source"]] = r["n"]
         for r in self.db.execute("SELECT COALESCE(label,'') l, COUNT(*) n FROM items WHERE state='new' GROUP BY l"):
             out["labels"][r["l"] or "unlabelled"] = r["n"]
+        out["unanswered"] = self.db.execute(
+            "SELECT COUNT(*) n FROM items WHERE state='new' AND tag='unanswered'").fetchone()["n"]
         nxt = self.db.execute("SELECT MIN(snooze_until) t FROM items WHERE state='snoozed'").fetchone()
         out["next_wake"] = nxt["t"] if nxt else None
         return out

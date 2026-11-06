@@ -23,6 +23,8 @@ def make_handler(store, lock, collect_kwargs):
             "/api/fix_link": lambda b: actions.fix_link(store, b["id"], b["url"]),
             "/api/label": lambda b: actions.teach_label(store, b["id"], b["label"], b.get("scope", "sender")),
             "/api/mute": lambda b: actions.mute_app(store, b["id"]),
+            "/api/group": lambda b: actions.group(store, b["id"], b["with"]),
+            "/api/ungroup": lambda b: actions.ungroup(store, b["id"]),
             "/api/rules/delete": lambda b: {"deleted": rules.delete(store, b["id"])},
             "/api/collect": lambda b: ({"demo": 0} if collect_kwargs.get("demo")
                                        else collectors.run_all(store, quiet=True, **collect_kwargs)),

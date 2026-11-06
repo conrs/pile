@@ -46,6 +46,8 @@ def main(argv=None):
                         help="read this macOS Notification Center database (a copy or a fixture)")
     common.add_argument("--windows-db", default=argparse.SUPPRESS,
                         help="read this Windows wpndatabase.db (a copy or a fixture)")
+    common.add_argument("--messages-db", default=argparse.SUPPRESS,
+                        help="read this macOS Messages chat.db (a copy or a fixture)")
     p = argparse.ArgumentParser(prog="pile", description=__doc__, parents=[common])
     p.add_argument("--version", action="version", version="pile " + __version__)
     sub = p.add_subparsers(dest="cmd")
@@ -61,17 +63,31 @@ def main(argv=None):
     sub.add_parser(parents=[common], name="mcp", help="MCP server on stdio, for Claude and other agents")
     sub.add_parser(parents=[common], name="triage", help="label new items: your rules first, then a model if configured")
     sub.add_parser(parents=[common], name="rules", help="print what pile has learned")
-    sub.add_parser(parents=[common], name="list", help="print the inbox")
+    ls = sub.add_parser(parents=[common], name="list", help="print the inbox")
+    ls.add_argument("--state", default="new", choices=["new", "done", "snoozed", "all"])
+    ls.add_argument("--source")
+    ls.add_argument("--json", action="store_true")
+    bf = sub.add_parser(parents=[common], name="backfill",
+                        help="pull older things you never followed up on (Messages, GitHub, mail)")
+    bf.add_argument("--days", type=float, default=30)
+    hi = sub.add_parser(parents=[common], name="history", help="what you did, newest first")
+    hi.add_argument("--limit", type=int, default=50)
+    hi.add_argument("--json", action="store_true")
+    ro = sub.add_parser(parents=[common], name="reopen", help="put done and snoozed items back in the inbox")
+    ro.add_argument("--since", help="only items cleared in the last 30m, 2h, 1d ...")
+    ro.add_argument("--all", action="store_true", help="every done and snoozed item")
+    ro.add_argument("--source")
     sub.add_parser(parents=[common], name="token", help="print the token for POST /ingest")
     args = p.parse_args(argv)
-    for k in ("db", "demo", "macos_db", "windows_db"):
+    for k in ("db", "demo", "macos_db", "windows_db", "messages_db"):
         if not hasattr(args, k):
             setattr(args, k, False if k == "demo" else None)
     if not args.cmd:
         p.print_help()
         return
     s = open_store(args)
-    kw = {k: v for k, v in (("macos_db", args.macos_db), ("windows_db", args.windows_db)) if v}
+    kw = {k: v for k, v in (("macos_db", args.macos_db), ("windows_db", args.windows_db),
+                            ("messages_db", args.messages_db)) if v}
 
     if args.cmd == "doctor":
         doctor(s, kw)
@@ -104,7 +120,33 @@ def main(argv=None):
     elif args.cmd == "rules":
         for r in rules.all_rules(s):
             print("%-3d %-5s %-28s %-24s %s" % (r["id"], r["kind"], r["app"] or "*", (r["sender"] or "*")[:24], r["value"]))
+    elif args.cmd == "backfill":
+        print(json.dumps(collectors.run_backfill(s, args.days, **kw)))
+        print("pile: %d unanswered in the inbox; see the Unanswered tab" % s.stats()["unanswered"], file=sys.stderr)
+    elif args.cmd == "history":
+        rows = s.history(args.limit)
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=1))
+        for r in [] if args.json else rows:
+            what = " ".join("%s=%s" % kv for kv in r["detail"].items())
+            print("%s  %-8s %5s  %-10s %-22s %s" % (time.strftime("%m-%d %H:%M", time.localtime(r["at"])), r["action"],
+                                                  r["item_id"] or "", (r["app_name"] or "")[:10],
+                                                  (r["sender"] or r["title"] or "")[:22], what[:60]))
+    elif args.cmd == "reopen":
+        if not (args.since or args.all or args.source):
+            p.error("reopen needs --since, --all or --source")
+        from .actions import parse_until
+        since = None
+        if args.since:
+            since = time.time() - (parse_until(args.since) - time.time())
+        n = s.reopen(since, args.source)
+        s.log("reopen_bulk", (None,), since=args.since, source=args.source, count=n)
+        print("reopened %d" % n)
     elif args.cmd == "list":
-        for i in s.items():
-            print("%5d  %-9s %-10s %-22s %s" % (i["id"], (i["label"] or "")[:9], i["app_name"][:10],
+        items = s.items(args.state, args.source)
+        if args.json:
+            print(json.dumps(items, ensure_ascii=False, indent=1))
+            return
+        for i in items:
+            print("%5d  %-9s %-10s %-22s %s" % (i["id"], (i["tag"] or i["label"] or "")[:9], i["app_name"][:10],
                                               (i["sender"] or "")[:22], (i["title"] + " " + i["body"]).strip()[:70]))
