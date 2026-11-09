@@ -109,6 +109,14 @@ def main(argv=None):
     ro.add_argument("--all", action="store_true", help="every done and snoozed item")
     ro.add_argument("--source")
     sub.add_parser(parents=[common], name="token", help="print the token for POST /ingest")
+    fw = sub.add_parser(parents=[common], name="forward",
+                        help="send what this pile collects to a hub's /ingest (token: PILE_HUB_TOKEN or ~/.config/pile/hub.token)")
+    fw.add_argument("--to", required=True, help="the hub's ingest URL, e.g. https://hub.example.com/pile/ingest")
+    fw.add_argument("--origin", help="this machine's name on the hub (default: its host name)")
+    fw.add_argument("--skip", action="append", default=[], help="a source not to send (repeatable), e.g. github")
+    fw.add_argument("--every", type=int, default=30, help="seconds between rounds")
+    fw.add_argument("--since", type=float, default=24, help="first run only: also send the last N hours")
+    fw.add_argument("--once", action="store_true", help="one round, then exit (1 if the hub was unreachable)")
     args = p.parse_args(argv)
     for k in ("db", "demo", "macos_db", "windows_db", "messages_db"):
         if not hasattr(args, k):
@@ -125,6 +133,26 @@ def main(argv=None):
     elif args.cmd == "token":
         from .collectors import webhook
         print(webhook.token(s))
+    elif args.cmd == "forward":
+        from . import forward
+        tok = forward.token()
+        if not tok:
+            p.error("no hub token: put it in %s (chmod 600) or set PILE_HUB_TOKEN" % forward.token_file())
+        if not args.to.startswith(("https://", "http://127.0.0.1", "http://localhost")):
+            p.error("--to must be https (or http on this machine): the token goes with every item")
+        forward.setup(s, args.since * 3600)
+        origin = (args.origin or forward.default_origin()).lower()
+        from .collectors.webhook import ORIGIN
+        if not ORIGIN.match(origin):
+            p.error("--origin: up to 24 lowercase letters, digits and dashes")
+        print("pile forward: %s -> %s as %s%s" % (os.path.basename(s.path), args.to, origin,
+              " (skipping %s)" % ", ".join(args.skip) if args.skip else ""), file=sys.stderr)
+        try:
+            forward.loop(s, args.to, tok, origin, args.skip, args.every, args.once)
+        except forward.Unreachable:
+            sys.exit(1)
+        except KeyboardInterrupt:
+            pass
     elif args.cmd == "collect" and args.demo:
         print(json.dumps({"demo": len(s.items())}))
     elif args.cmd == "collect":

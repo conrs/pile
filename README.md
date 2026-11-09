@@ -195,9 +195,27 @@ It labels new items `needs-you`, `fyi` or `noise`; labels show as chips. Your ow
 
 Set `PILE_WRITEBACK=1` and marking something done in pile clears it at the source too: mail is marked read over IMAP, and GitHub notification threads are marked done. It happens in the background, so pile stays instant. Undo puts mail back to unread; GitHub can't make a thread unread again, so an undone GitHub item just stays in pile. Snooze stays inside pile. Notification Center banners can't be cleared by another app on macOS, so those only leave pile.
 
+## Forward to a hub: one inbox across machines
+
+`pile forward` sends what this pile collects to another pile's `/ingest` as it arrives, so a server you can reach from anywhere (a home box behind a tunnel, a VPS) holds one merged inbox. Run it beside `pile serve` (or `pile watch`), which does the collecting:
+
+```sh
+mkdir -p ~/.config/pile
+pbpaste > ~/.config/pile/hub.token        # the hub's `pile token`, copied over; never a flag
+chmod 600 ~/.config/pile/hub.token
+python3 -m pile forward --to https://hub.example.com/ingest --origin mac --skip github
+```
+
+- **Where it came from.** The hub keeps each item as `<origin>:<source>` (`mac:macos`, `mac:messages`) with its app, sender, thread, text, time and best link (learned links included). Links only the sending machine can open (`bundle:`) are dropped; the item still arrives.
+- **At least once, never twice.** Items go one by one, oldest first, and are marked sent only when the hub said yes. The hub dedupes by the sending pile's own source and id, so a resend lands on the same row. An item a source refreshes (a newer message in it) goes again and reopens on the hub.
+- **Hub away.** Nothing is marked, the error prints once, and the next round (every 30 s, `--every`) catches up. A wrong token or a login page in the way (Cloudflare Access answers with HTML) counts as away, not as delivered.
+- **What goes.** What arrives from the first run on, plus the last day (`--since 24`, hours); never the whole history. Items you already cleared here stay here. `--skip github` leaves out a source the hub collects itself.
+- **Token.** `PILE_HUB_TOKEN`, or the file `PILE_HUB_TOKEN_FILE` (default `~/.config/pile/hub.token`). Behind Cloudflare Access with a service token, also set `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` (in `~/.config/pile/env`). `--to` must be https unless it's this machine.
+- **Done.** Clearing an item on the hub clears it there only; the sending machine keeps its own copy.
+
 ## Privacy
 
-Everything stays on your machine: one SQLite file at `~/.local/share/pile/inbox.db` (or `--db PATH`). The web UI binds to 127.0.0.1 and refuses other host names and cross-site requests. Nothing leaves your computer unless you turn on model triage, which sends item text to the endpoint you chose. The collectors only read, and pile never changes anything in the source apps unless you turn on writeback (below).
+Everything stays on your machine: one SQLite file at `~/.local/share/pile/inbox.db` (or `--db PATH`). The web UI binds to 127.0.0.1 and refuses other host names and cross-site requests. Nothing leaves your computer unless you turn on model triage, which sends item text to the endpoint you chose, or run `pile forward`, which sends new items to the hub you name. The collectors only read, and pile never changes anything in the source apps unless you turn on writeback (below).
 
 ## Write a collector
 
