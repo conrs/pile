@@ -133,6 +133,17 @@ def make_handler(store, lock, collect_kwargs, presence=None):
                     return self._send(413, {"error": "too big"})
                 presence.publish(json.loads(self.rfile.read(n) or b"{}"))
                 return self._send(200, {"ok": True})
+            if path == "/api/action":  # runs its own locking: the request it makes can't hold the lock
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(n) or b"{}")
+                    out = actions.run_action(store, body["id"], body["index"], lock)
+                    presence.changed()
+                    return self._send(200, out)
+                except actions.ActionFailed as e:
+                    return self._send(502, {"error": str(e)})
+                except (KeyError, ValueError, TypeError) as e:
+                    return self._send(400, {"error": str(e)})
             fn = post_routes().get(path)
             if not fn:
                 return self._send(404, {"error": "not found"})

@@ -6,14 +6,20 @@ Use it from Tasker or MacroDroid on Android, an ntfy subscription, a cron job, a
       -H "Content-Type: application/json" \\
       -d '{"app": "Deploys", "title": "prod is green", "body": "v1.4.2", "url": "https://ci.example.com/42"}'
 
-Fields: app (required), title or body (one required), sender, body, url, id (dedupe key), at (unix seconds).
+Fields: app (required), title or body (one required), sender, body, url, id (dedupe key), at (unix seconds),
+actions: up to 4 row buttons, [{label, url, method?, headers?, headersFromFile?, body?, confirm?}]. Pile's server makes
+the request (so a secret in headersFromFile, a file under ~/.config, never reaches the page), only to a loopback URL,
+and marks the item done when it answers 2xx.
 """
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import re
 import secrets
 import time
+from urllib.parse import urlsplit
 
 NAME = "webhook"
 PLATFORMS = ("any",)
@@ -46,6 +52,62 @@ def check_url(url: str) -> str:
     return url
 
 
+LOOPBACK = ("127.0.0.1", "localhost", "::1")
+METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
+HEADER = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+
+
+def loopback(url: str) -> bool:
+    try:
+        u = urlsplit(url)
+        return u.scheme == "http" and u.hostname in LOOPBACK and not u.username and not u.password
+    except ValueError:
+        return False
+
+
+def secret_file(path: str) -> str:
+    """headersFromFile may only name a file under ~/.config, so an item can't make pile send any file it can read."""
+    full = os.path.realpath(os.path.expanduser(path))
+    root = os.path.realpath(os.path.expanduser("~/.config"))
+    if not full.startswith(root + os.sep):
+        raise ValueError("headersFromFile: a file under ~/.config")
+    return path
+
+
+def check_actions(acts) -> list:
+    if acts in (None, []):
+        return []
+    if not isinstance(acts, list) or len(acts) > 4:
+        raise ValueError("actions: a list of at most 4")
+    out = []
+    for i, a in enumerate(acts):
+        if not isinstance(a, dict):
+            raise ValueError("actions[%d]: an object" % i)
+        label, url = str(a.get("label") or "").strip(), str(a.get("url") or "").strip()
+        method = str(a.get("method") or "POST").upper()
+        if not label or len(label) > 40:
+            raise ValueError("actions[%d].label: 1 to 40 characters" % i)
+        if not loopback(url) or len(url) > 2000:
+            raise ValueError("actions[%d].url: http://127.0.0.1 or localhost only" % i)
+        if method not in METHODS:
+            raise ValueError("actions[%d].method: one of %s" % (i, ", ".join(METHODS)))
+        b = {"label": label, "url": url, "method": method}
+        for k in ("headers", "headersFromFile"):
+            h = a.get(k) or {}
+            if not isinstance(h, dict) or not all(HEADER.match(str(n)) and isinstance(v, str) for n, v in h.items()):
+                raise ValueError("actions[%d].%s: {name: string}" % (i, k))
+            if h:
+                b[k] = {n: (secret_file(v) if k == "headersFromFile" else v) for n, v in h.items()}
+        if a.get("body") is not None:
+            if not isinstance(a["body"], (dict, list, str)) or len(json.dumps(a["body"])) > 8192:
+                raise ValueError("actions[%d].body: JSON or a string, at most 8 KB" % i)
+            b["body"] = a["body"]
+        if a.get("confirm"):
+            b["confirm"] = str(a["confirm"])[:200]
+        out.append(b)
+    return out
+
+
 def ingest(store, p: dict) -> dict:
     if not isinstance(p, dict):
         raise ValueError("expected a JSON object")
@@ -59,7 +121,8 @@ def ingest(store, p: dict) -> dict:
     at = float(p.get("at") or time.time())
     ext = str(p.get("id") or hashlib.sha1(("%s|%s|%s|%s" % (app, title, body, at)).encode()).hexdigest())
     url = check_url(str(p.get("url") or ""))
-    item_id = store.upsert({
+    buttons = check_actions(p.get("actions"))
+    item_id = store.upsert({"buttons": buttons,
         "source": str(p.get("source") or NAME)[:40], "ext_id": ext[:200], "app": "hook:" + app.lower()[:80],
         "app_name": app[:80], "thread": "hook:%s|%s" % (app.lower(), sender), "sender": sender,
         "title": title[:500] if sender != title else "", "body": (body or title)[:2000], "at": at, "url": url[:2000]})

@@ -61,6 +61,7 @@ body.kbd .row:hover:not(.sel) .acts{display:none}
 .row:hover .acts,.row.sel .acts{display:flex}
 .acts button{font-size:12px;padding:3px 8px;border-radius:6px;color:var(--dim)}
 .acts button:hover{background:var(--bg);color:var(--text)}
+.acts button.go{color:var(--accent);border:1px solid rgba(255,181,71,.35)}
 @media (hover:hover){.row.sel:not(:hover) .acts{display:none}}
 .row.picked{}
 .row.picked .av{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
@@ -282,6 +283,7 @@ function render(){
         <div class="l2">${it.title ? `<span class="t">${esc(F(it, "title"))}</span> — ` : ""}${esc(F(it, "body"))}</div>
         ${g.items.length > 1 ? g.items.slice(1, 5).map(x => `<div class="l2 older"><span class="t">${esc(F(x, "sender") || x.app_name)}</span> ${esc(F(x, "body"))} <span class="when">${ago(x.at)}</span></div>`).join("") + (g.items.length > 5 ? `<div class="l2 older">+${g.items.length - 5} more</div>` : "") : ""}</div>
       <div class="acts">
+        ${(it.actions || []).map((b, k) => `<button class="go" data-a="run" data-k="${k}" title="${esc(b.confirm || b.label)}">${esc(b.label)}</button>`).join("")}
         <button data-a="open" title="Open (o)">Open</button><button data-a="done" title="${S.view === "done" ? "Back to inbox (e)" : "Done (e)"}">${S.view === "done" ? "Undone" : "Done"}</button>
         <button data-a="snooze" title="Snooze (s)">Snooze</button><button data-a="imp" title="Always important (+)">+</button>
         <button data-a="noise" title="Not important (-)">−</button><button data-a="fix" title="Fix where it opens (f)">Fix link</button>
@@ -523,6 +525,24 @@ function mute(){
   }
 }
 
+// A row's own button (from /ingest): pile's server makes the request, so its secrets never reach this page.
+function runAction(k){
+  const it = current() && current().lead, b = it && (it.actions || [])[k]; if (!b) return;
+  if (b.confirm) {
+    modal(`<h3>${esc(b.label)}?</h3><p>${esc(b.confirm)}</p>
+      <div class="opts"><button data-m="1"><span>${esc(b.label)}</span><kbd>y</kbd></button><button data-m="0"><span>Cancel</span><kbd>esc</kbd></button></div>`,
+      key => { if (key === "y") { closeModal(); go(); return true; } });
+    $("#popcard").onclick = e => { const m = e.target.closest("[data-m]"); if (m) { closeModal(); if (m.dataset.m === "1") go(); } };
+  } else go();
+  async function go(){
+    toast(b.label + "…");
+    try {
+      const r = await api("/api/action", {id: it.id, index: k});
+      dropItems([it.id]); render(); toast(b.label + (r.result ? ": " + r.result : "") + " · z undoes the done");
+    } catch (err) { toast("Didn't work: " + err.message); }
+  }
+}
+
 // c: combine the selected rows into one conversation (the newest row's). With nothing selected, start a selection.
 async function combine(){
   const gs = targets();
@@ -589,6 +609,7 @@ document.addEventListener("click", e => {
   const b = e.target.closest("[data-a]");
   if (b) {
     S.sel = +b.closest(".row").dataset.i;
+    if (b.dataset.a === "run") return runAction(+b.dataset.k);
     ({open: openSel, done: () => act("done"), snooze: snoozeMenu, imp: () => teach("needs-you"), noise: () => teach("noise"),
       fix: fixLink, pick: () => { pick(S.sel); render(); }, combine, mute})[b.dataset.a]();
     return;

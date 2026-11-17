@@ -47,7 +47,12 @@ CREATE TABLE IF NOT EXISTS rules (
 """
 
 FIELDS = ("id", "source", "ext_id", "app", "app_name", "thread", "sender", "title",
-          "body", "at", "url", "state", "snooze_until", "label", "label_by", "tag", "changed_at")
+          "body", "at", "url", "state", "snooze_until", "label", "label_by", "tag", "changed_at", "buttons")
+
+
+def _buttons(v) -> Optional[str]:
+    import json
+    return json.dumps(v) if v else None
 
 
 def default_path() -> str:
@@ -66,7 +71,7 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
         cols = {r["name"] for r in self.db.execute("PRAGMA table_info(items)")}
-        for col, decl in (("tag", "TEXT"), ("changed_at", "REAL")):  # added after 0.1.0
+        for col, decl in (("tag", "TEXT"), ("changed_at", "REAL"), ("buttons", "TEXT")):  # added after 0.1.0
             if col not in cols:
                 self.db.execute("ALTER TABLE items ADD COLUMN %s %s" % (col, decl))
         cols = {r["name"] for r in self.db.execute("PRAGMA table_info(actions)")}
@@ -109,17 +114,19 @@ class Store:
                  item["body"], item["at"], item["url"], old["id"]))
             if item.get("tag"):
                 self.db.execute("UPDATE items SET tag=? WHERE id=?", (item["tag"], old["id"]))
+            if "buttons" in item:
+                self.db.execute("UPDATE items SET buttons=? WHERE id=?", (_buttons(item["buttons"]), old["id"]))
             return old["id"]
         label, label_by = item.get("label"), item.get("label_by")
         if not label:
             label = rules.label_for(self, item)
             label_by = "rule" if label else None
         cur = self.db.execute(
-            "INSERT INTO items(source, ext_id, app, app_name, thread, sender, title, body, at, url, state, label, label_by, tag)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO items(source, ext_id, app, app_name, thread, sender, title, body, at, url, state, label, label_by, tag, buttons)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (item["source"], item["ext_id"], item["app"], item["app_name"], item["thread"], item["sender"],
              item["title"], item["body"], item["at"], item["url"], item.get("state", "new"), label, label_by,
-             item.get("tag")))
+             item.get("tag"), _buttons(item.get("buttons"))))
         return cur.lastrowid
 
     def _wake_snoozed(self) -> None:
@@ -143,8 +150,17 @@ class Store:
         r = self.db.execute("SELECT * FROM items WHERE id=?", (int(item_id),)).fetchone()
         return self.present(dict(r)) if r else None
 
+    def buttons(self, item_id: int) -> list:
+        """An item's action buttons in full (url, headers...), for running one. Never sent to the page."""
+        import json
+        r = self.db.execute("SELECT buttons FROM items WHERE id=?", (int(item_id),)).fetchone()
+        return json.loads(r["buttons"]) if r and r["buttons"] else []
+
     def present(self, item: dict) -> dict:
+        import json
         from . import rules
+        # The page sees each button's label and confirm text only.
+        item["actions"] = [{k: b[k] for k in ("label", "confirm") if b.get(k)} for b in json.loads(item.pop("buttons", None) or "[]")]
         item["raw_thread"] = item["thread"]
         item["thread"] = rules.thread_for(self, item)
         link, learned = rules.resolve_link(self, item)

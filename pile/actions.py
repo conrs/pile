@@ -1,8 +1,12 @@
 """The verbs the web UI and the MCP server share."""
 from __future__ import annotations
 
+import contextlib
+import os
 import re
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 from typing import Union
 
@@ -203,3 +207,74 @@ def combine(store, ids) -> dict:
                 out.append(rules.add(store, "group", target["thread"], app=it["app"], sender=it["thread"],
                                      note="%s + %s" % (target["sender"] or target["title"], it["sender"] or it["title"])))
     return {"thread": target["thread"], "rules": out}
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **kw):
+        return None  # a redirect could carry the secret header off this machine
+
+
+def _request(b: dict, timeout: float = 20):
+    """Make one button's request: (status, text)."""
+    import json
+    from .collectors import webhook
+    if not webhook.loopback(b["url"]):  # checked at ingest too; the rule matters most here
+        raise ValueError("action url isn't loopback")
+    headers = dict(b.get("headers") or {})
+    for name, path in (b.get("headersFromFile") or {}).items():
+        with open(os.path.expanduser(webhook.secret_file(path))) as f:
+            headers[name] = f.read().strip()
+    data = b.get("body")
+    if data is not None and not isinstance(data, str):
+        data = json.dumps(data)
+        headers.setdefault("Content-Type", "application/json")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+    req = urllib.request.Request(b["url"], data=data.encode() if data is not None else None, headers=headers, method=b["method"])
+    try:
+        with opener.open(req, timeout=timeout) as r:
+            return r.status, r.read(65536).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        with e:
+            return e.code, e.read(65536).decode("utf-8", "replace")
+
+
+def _summary(text: str) -> str:
+    """A JSON answer's message or status, else the first line of the text."""
+    import json
+    try:
+        j = json.loads(text)
+        if isinstance(j, dict):
+            for k in ("message", "status", "error", "result"):
+                if isinstance(j.get(k), str):
+                    return j[k][:200]
+    except ValueError:
+        pass
+    return (text.strip().splitlines() or [""])[0][:200]
+
+
+def run_action(store, item_id, index, lock=None) -> dict:
+    """Press one of an item's buttons. The request runs outside the lock (the far end may POST back to /ingest);
+    a 2xx marks the item done, as one undoable step."""
+    lock = lock or contextlib.nullcontext()
+    with lock:
+        item = store.get(item_id)
+        if not item:
+            raise KeyError("no item %s" % item_id)
+        buttons = store.buttons(item_id)
+        if not 0 <= int(index) < len(buttons):
+            raise ValueError("no button %s" % index)
+        b = buttons[int(index)]
+    try:
+        status, text = _request(b)
+    except (OSError, urllib.error.URLError) as e:
+        raise ActionFailed("%s: %s" % (b["label"], getattr(e, "reason", e)))
+    if not 200 <= status < 300:
+        raise ActionFailed("%s: %d %s" % (b["label"], status, _summary(text)))
+    with lock:
+        with store.recording("action", [item["id"]], label=b["label"]):
+            store.set_state([item["id"]], "done")
+    return {"done": 1, "label": b["label"], "status": status, "result": _summary(text)}
+
+
+class ActionFailed(Exception):
+    """The far end refused or couldn't be reached; the item stays as it was."""

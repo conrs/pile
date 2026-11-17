@@ -88,6 +88,17 @@ curl -X POST http://<your-computer>:8765/ingest \
 
 A native Android companion app is future work.
 
+**Buttons.** An ingested item can carry up to four `actions`, shown as buttons on its row, so a local service asking you a yes/no question gets its answer without you leaving pile:
+
+```json
+{"app": "Calendar door", "title": "Thu 8:00 with Sam?", "url": "http://127.0.0.1:8796/decide/p_1",
+ "actions": [{"label": "Yes", "url": "http://127.0.0.1:8796/local/proposals/p_1/decide", "method": "POST",
+              "headersFromFile": {"x-door-local": "~/.config/door/local.token"}, "body": {"decision": "yes"}},
+             {"label": "No", "url": "...", "body": {"decision": "no"}, "confirm": "Decline Sam?"}]}
+```
+
+pile's server makes the request, not the page, so a secret named in `headersFromFile` (a file under `~/.config`, read when the button is pressed) never reaches the browser or the database. Only `http://127.0.0.1` and `localhost` URLs are allowed, redirects aren't followed, and a 2xx marks the item done (`z` puts it back in the inbox; it can't take back what the far end did). Items forwarded from another pile drop their buttons, since their loopback isn't this one.
+
 ## Mail
 
 Put settings in `~/.config/pile/env` (then `chmod 600 ~/.config/pile/env`). pile reads it, then a `.env` in the folder you run it from; real environment variables always win, and `pile doctor` says which file it used without printing values. Prefer the config file over a `.env` inside a repo.
