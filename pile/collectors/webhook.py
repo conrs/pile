@@ -114,6 +114,14 @@ def ingest(store, p: dict) -> dict:
     if p.get("origin"):
         return forwarded(store, p)
     app = str(p.get("app") or "").strip()
+    if p.get("done") is True:  # the sender's thing is over (a withdrawn proposal): close its item, never create one
+        if not app or not p.get("id"):
+            raise ValueError("done needs app and id")
+        old = store.db.execute("SELECT id FROM items WHERE source=? AND ext_id=?",
+                               (str(p.get("source") or NAME)[:40], str(p["id"])[:200])).fetchone()
+        if old:
+            store.set_state([old["id"]], "done")
+        return {"id": old["id"] if old else None, "done": True}
     title, body = str(p.get("title") or "").strip(), str(p.get("body") or "").strip()
     if not app or not (title or body):
         raise ValueError("need app and a title or body")
