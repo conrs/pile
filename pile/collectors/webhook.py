@@ -7,7 +7,7 @@ Use it from Tasker or MacroDroid on Android, an ntfy subscription, a cron job, a
       -d '{"app": "Deploys", "title": "prod is green", "body": "v1.4.2", "url": "https://ci.example.com/42"}'
 
 Fields: app (required), title or body (one required), sender, body, url, id (dedupe key), at (unix seconds),
-actions: up to 4 row buttons, [{label, url, method?, headers?, headersFromFile?, body?, confirm?}]. Pile's server makes
+label (needs-you, fyi or noise: the sender's own call, unless one of your rules matches), actions: up to 4 row buttons, [{label, url, method?, headers?, headersFromFile?, body?, confirm?}]. Pile's server makes
 the request (so a secret in headersFromFile, a file under ~/.config, never reaches the page), only to a loopback URL,
 and marks the item done when it answers 2xx.
 """
@@ -122,10 +122,17 @@ def ingest(store, p: dict) -> dict:
     ext = str(p.get("id") or hashlib.sha1(("%s|%s|%s|%s" % (app, title, body, at)).encode()).hexdigest())
     url = check_url(str(p.get("url") or ""))
     buttons = check_actions(p.get("actions"))
-    item_id = store.upsert({"buttons": buttons,
+    label = p.get("label")
+    if label is not None and label not in ("needs-you", "fyi", "noise"):
+        raise ValueError("label: needs-you, fyi or noise")
+    item = {"buttons": buttons,
         "source": str(p.get("source") or NAME)[:40], "ext_id": ext[:200], "app": "hook:" + app.lower()[:80],
         "app_name": app[:80], "thread": "hook:%s|%s" % (app.lower(), sender), "sender": sender,
-        "title": title[:500] if sender != title else "", "body": (body or title)[:2000], "at": at, "url": url[:2000]})
+        "title": title[:500] if sender != title else "", "body": (body or title)[:2000], "at": at, "url": url[:2000]}
+    from .. import rules
+    if label and not rules.label_for(store, item):
+        item["label"], item["label_by"] = label, "sender"
+    item_id = store.upsert(item)
     return {"id": item_id, "muted": item_id is None}
 
 

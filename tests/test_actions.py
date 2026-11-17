@@ -155,6 +155,15 @@ class ActionsTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(self.s.buttons(f["id"]), [])
 
+    def test_the_sender_may_label_an_item_unless_a_rule_says_otherwise(self):
+        _, a = self.ingest([], label="needs-you")
+        self.assertEqual((self.s.get(a["id"])["label"], self.s.get(a["id"])["label_by"]), ("needs-you", "sender"))
+        self.assertEqual(self.ingest([], id="x2", label="urgent")[0], 400)
+        # Control: your own rule wins over the sender's label.
+        self.call("/api/label", {"id": a["id"], "label": "fyi"})
+        _, b = self.ingest([], id="x3", label="needs-you")
+        self.assertEqual(self.s.get(b["id"])["label"], "fyi")
+
 
 if __name__ == "__main__":
     unittest.main()

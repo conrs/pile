@@ -99,6 +99,8 @@ A native Android companion app is future work.
 
 pile's server makes the request, not the page, so a secret named in `headersFromFile` (a file under `~/.config`, read when the button is pressed) never reaches the browser or the database. Only `http://127.0.0.1` and `localhost` URLs are allowed, redirects aren't followed, and a 2xx marks the item done (`z` puts it back in the inbox; it can't take back what the far end did). Items forwarded from another pile drop their buttons, since their loopback isn't this one.
 
+A sender can also say how much an item matters with `"label": "needs-you"` (or `fyi`, `noise`); your own rules still win.
+
 ## Mail
 
 Put settings in `~/.config/pile/env` (then `chmod 600 ~/.config/pile/env`). pile reads it, then a `.env` in the folder you run it from; real environment variables always win, and `pile doctor` says which file it used without printing values. Prefer the config file over a `.env` inside a repo.
