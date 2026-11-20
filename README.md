@@ -91,9 +91,9 @@ A native Android companion app is future work.
 **Buttons.** An ingested item can carry up to four `actions`, shown as buttons on its row, so a local service asking you a yes/no question gets its answer without you leaving pile:
 
 ```json
-{"app": "Calendar door", "title": "Thu 8:00 with Sam?", "url": "http://127.0.0.1:8796/decide/p_1",
- "actions": [{"label": "Yes", "url": "http://127.0.0.1:8796/local/proposals/p_1/decide", "method": "POST",
-              "headersFromFile": {"x-door-local": "~/.config/door/local.token"}, "body": {"decision": "yes"}},
+{"app": "Scheduler", "title": "Thu 8:00 with Sam?", "url": "http://127.0.0.1:9000/decide/p_1",
+ "actions": [{"label": "Yes", "url": "http://127.0.0.1:9000/proposals/p_1/decide", "method": "POST",
+              "headersFromFile": {"x-local-token": "~/.config/scheduler/local.token"}, "body": {"decision": "yes"}},
              {"label": "No", "url": "...", "body": {"decision": "no"}, "confirm": "Decline Sam?"}]}
 ```
 

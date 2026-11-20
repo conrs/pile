@@ -77,12 +77,12 @@ class ActionsTest(unittest.TestCase):
             return e.code, json.loads(e.read())
 
     def ingest(self, acts, **kw):
-        return self.call("/ingest", dict({"app": "Boardy", "title": "Boardy wants Thu 8:00", "id": "door-p1-v1",
+        return self.call("/ingest", dict({"app": "Scheduler", "title": "Sam wants Thu 8:00", "id": "sched-p1-v1",
                                           "actions": acts}, **kw), self.tok)
 
     def button(self, label="No", path="/local/proposals/p1/decide", **kw):
         return dict({"label": label, "url": self.far.url + path, "method": "POST",
-                     "headersFromFile": {"x-door-local": "~/.config/svc/local.token"}, "body": {"decision": "no"}}, **kw)
+                     "headersFromFile": {"x-local-token": "~/.config/svc/local.token"}, "body": {"decision": "no"}}, **kw)
 
     def items(self, state="new"):
         with urllib.request.urlopen(self.base + "/api/items?state=" + state) as r:
@@ -95,13 +95,13 @@ class ActionsTest(unittest.TestCase):
         raw, items = self.items()
         self.assertEqual(items[0]["actions"], [{"label": "Yes: Thu 11:00"}, {"label": "No"}])
         # The page never sees the secret, the header name or the far end's URL.
-        for leak in ("s3cret", "x-door-local", "local.token", self.far.url):
+        for leak in ("s3cret", "x-local-token", "local.token", self.far.url):
             self.assertNotIn(leak, raw)
         code, r = self.call("/api/action", {"id": out["id"], "index": 1})
         self.assertEqual((code, r["done"], r["label"], r["result"]), (200, 1, "No", "declined"))
         got = self.far.got[0]
         self.assertEqual(got["path"], "/local/proposals/p1/decide")
-        self.assertEqual(got["headers"]["x-door-local"], "s3cret-value")
+        self.assertEqual(got["headers"]["x-local-token"], "s3cret-value")
         self.assertEqual(json.loads(got["body"]), {"decision": "no"})
         self.assertEqual(self.s.get(out["id"])["state"], "done")
         self.assertEqual(self.call("/api/undo", {})[1]["undid"][0].split(" · ")[0], "action")
